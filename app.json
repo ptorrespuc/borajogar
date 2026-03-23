@@ -15,9 +15,11 @@
       "backgroundColor": "#ffffff"
     },
     "ios": {
+      "bundleIdentifier": "br.pucrio.futeboldequarta",
       "supportsTablet": true
     },
     "android": {
+      "package": "br.pucrio.futeboldequarta",
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
         "backgroundColor": "#ffffff"
