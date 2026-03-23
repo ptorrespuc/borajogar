@@ -15,6 +15,9 @@
       "backgroundColor": "#ffffff"
     },
     "ios": {
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      },
       "bundleIdentifier": "br.pucrio.futeboldequarta",
       "supportsTablet": true
     },
