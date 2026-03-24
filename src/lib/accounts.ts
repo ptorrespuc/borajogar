@@ -56,10 +56,51 @@ export type CreateSportModalityInput = {
   positions: string[];
 };
 
+export type UpdateSportModalityInput = {
+  modalityId: string;
+  name: string;
+  slug: string;
+  playersPerTeam: number;
+  positions: string[];
+};
+
+export type UpdateSportsAccountInput = {
+  accountId: string;
+  name: string;
+  slug: string;
+  modalityId: string;
+  timezone: string;
+  maxPlayersPerEvent: number;
+  confirmationOpenHoursBefore: number;
+  confirmationCloseMinutesBefore: number;
+  autoNotifyConfirmationOpen: boolean;
+  autoNotifyWaitlistChanges: boolean;
+  autoNotifyEventUpdates: boolean;
+  schedule: {
+    weekday: number;
+    startsAt: string;
+    endsAt: string;
+  };
+  priorityGroups: Array<{
+    name: string;
+    colorHex: string | null;
+  }>;
+};
+
 function throwIfError(error: { message: string } | null) {
   if (error) {
     throw new Error(error.message);
   }
+}
+
+function toNormalizedCode(value: string) {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .replace(/-{2,}/g, "-");
 }
 
 export async function listSportModalities(): Promise<SportModality[]> {
@@ -335,13 +376,7 @@ export async function createSportModality(input: CreateSportModalityInput) {
       uniquePositions.map((position, index) => ({
         modality_id: modality.id,
         name: position,
-        code: position
-          .normalize("NFD")
-          .replace(/[\u0300-\u036f]/g, "")
-          .toLowerCase()
-          .replace(/[^a-z0-9]+/g, "-")
-          .replace(/^-+|-+$/g, "")
-          .replace(/-{2,}/g, "-"),
+        code: toNormalizedCode(position),
         sort_order: index + 1,
       })),
     );
@@ -350,6 +385,73 @@ export async function createSportModality(input: CreateSportModalityInput) {
   }
 
   return modality;
+}
+
+export async function updateSportModality(input: UpdateSportModalityInput) {
+  const { error: modalityError } = await supabase
+    .from("sport_modalities")
+    .update({
+      name: input.name,
+      slug: input.slug,
+      players_per_team: input.playersPerTeam,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", input.modalityId);
+
+  throwIfError(modalityError);
+
+  const { data: existingPositionData, error: existingPositionError } = await supabase
+    .from("modality_positions")
+    .select("id, modality_id, name, code, sort_order, created_at, updated_at")
+    .eq("modality_id", input.modalityId)
+    .order("sort_order", { ascending: true });
+
+  throwIfError(existingPositionError);
+
+  const existingPositions = (existingPositionData ?? []) as ModalityPosition[];
+  const desiredPositions = [...new Set(input.positions.map((position) => position.trim()).filter(Boolean))];
+  const existingByCode = new Map(existingPositions.map((position) => [position.code, position]));
+  const desiredCodes = new Set<string>();
+
+  for (const [index, desiredPosition] of desiredPositions.entries()) {
+    const code = toNormalizedCode(desiredPosition);
+    desiredCodes.add(code);
+    const existingPosition = existingByCode.get(code);
+
+    if (existingPosition) {
+      const { error: updatePositionError } = await supabase
+        .from("modality_positions")
+        .update({
+          name: desiredPosition,
+          sort_order: index + 1,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", existingPosition.id);
+
+      throwIfError(updatePositionError);
+      continue;
+    }
+
+    const { error: insertPositionError } = await supabase.from("modality_positions").insert({
+      modality_id: input.modalityId,
+      name: desiredPosition,
+      code,
+      sort_order: index + 1,
+    });
+
+    throwIfError(insertPositionError);
+  }
+
+  const removablePositions = existingPositions.filter((position) => !desiredCodes.has(position.code));
+
+  for (const position of removablePositions) {
+    const { error: deletePositionError } = await supabase
+      .from("modality_positions")
+      .delete()
+      .eq("id", position.id);
+
+    throwIfError(deletePositionError);
+  }
 }
 
 export async function createSportsAccount(input: CreateSportsAccountInput) {
@@ -414,6 +516,147 @@ export async function createSportsAccount(input: CreateSportsAccountInput) {
   throwIfError(priorityGroupsError);
 
   return account;
+}
+
+export async function updateSportsAccount(input: UpdateSportsAccountInput) {
+  const { error: accountError } = await supabase
+    .from("sports_accounts")
+    .update({
+      name: input.name,
+      slug: input.slug,
+      modality_id: input.modalityId,
+      timezone: input.timezone,
+      max_players_per_event: input.maxPlayersPerEvent,
+      confirmation_open_hours_before: input.confirmationOpenHoursBefore,
+      confirmation_close_minutes_before: input.confirmationCloseMinutesBefore,
+      auto_notify_confirmation_open: input.autoNotifyConfirmationOpen,
+      auto_notify_waitlist_changes: input.autoNotifyWaitlistChanges,
+      auto_notify_event_updates: input.autoNotifyEventUpdates,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", input.accountId);
+
+  throwIfError(accountError);
+
+  const [
+    { data: scheduleData, error: scheduleError },
+    { data: priorityGroupData, error: priorityGroupError },
+  ] = await Promise.all([
+    supabase
+      .from("account_schedules")
+      .select("id, account_id, weekday, starts_at, ends_at, is_active, created_at, updated_at")
+      .eq("account_id", input.accountId)
+      .order("created_at", { ascending: true }),
+    supabase
+      .from("account_priority_groups")
+      .select("id, account_id, name, priority_rank, color_hex, is_active, created_at, updated_at")
+      .eq("account_id", input.accountId)
+      .order("priority_rank", { ascending: true }),
+  ]);
+
+  throwIfError(scheduleError);
+  throwIfError(priorityGroupError);
+
+  const existingSchedules = (scheduleData ?? []) as AccountSchedule[];
+  const existingPriorityGroups = (priorityGroupData ?? []) as AccountPriorityGroup[];
+  const normalizedStartsAt =
+    input.schedule.startsAt.length === 5 ? `${input.schedule.startsAt}:00` : input.schedule.startsAt;
+  const normalizedEndsAt =
+    input.schedule.endsAt.length === 5 ? `${input.schedule.endsAt}:00` : input.schedule.endsAt;
+
+  if (existingSchedules[0]) {
+    const { error: primaryScheduleError } = await supabase
+      .from("account_schedules")
+      .update({
+        weekday: input.schedule.weekday,
+        starts_at: normalizedStartsAt,
+        ends_at: normalizedEndsAt,
+        is_active: true,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", existingSchedules[0].id);
+
+    throwIfError(primaryScheduleError);
+  } else {
+    const { error: insertScheduleError } = await supabase.from("account_schedules").insert({
+      account_id: input.accountId,
+      weekday: input.schedule.weekday,
+      starts_at: normalizedStartsAt,
+      ends_at: normalizedEndsAt,
+      is_active: true,
+    });
+
+    throwIfError(insertScheduleError);
+  }
+
+  const extraSchedules = existingSchedules.slice(1);
+
+  for (const schedule of extraSchedules) {
+    const { error: deleteScheduleError } = await supabase
+      .from("account_schedules")
+      .delete()
+      .eq("id", schedule.id);
+
+    throwIfError(deleteScheduleError);
+  }
+
+  for (const [index, group] of input.priorityGroups.entries()) {
+    const existingGroup = existingPriorityGroups[index];
+
+    if (existingGroup) {
+      const { error: updateGroupError } = await supabase
+        .from("account_priority_groups")
+        .update({
+          name: group.name,
+          priority_rank: index + 1,
+          color_hex: group.colorHex,
+          is_active: true,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", existingGroup.id);
+
+      throwIfError(updateGroupError);
+      continue;
+    }
+
+    const { error: insertGroupError } = await supabase.from("account_priority_groups").insert({
+      account_id: input.accountId,
+      name: group.name,
+      priority_rank: index + 1,
+      color_hex: group.colorHex,
+      is_active: true,
+    });
+
+    throwIfError(insertGroupError);
+  }
+
+  const extraGroups = existingPriorityGroups.slice(input.priorityGroups.length);
+
+  for (const [offset, group] of extraGroups.entries()) {
+    const { error: archiveGroupError } = await supabase
+      .from("account_priority_groups")
+      .update({
+        name: `__inactive_${group.id}`,
+        priority_rank: 1000 + offset,
+        is_active: false,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", group.id);
+
+    throwIfError(archiveGroupError);
+  }
+}
+
+export async function deleteSportModality(modalityId: string) {
+  const { error } = await supabase.from("sport_modalities").delete().eq("id", modalityId);
+
+  throwIfError(error);
+}
+
+export async function deleteSportsAccount(accountId: string) {
+  const { error } = await supabase.from("sports_accounts").delete().eq("id", accountId);
+
+  throwIfError(error);
 }
 
 export async function upsertAccountMembership(input: {

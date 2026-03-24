@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import {
   ActivityIndicator,
+  Alert,
+  Modal,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -13,10 +15,15 @@ import Colors from "@/constants/Colors";
 import {
   createSportModality,
   createSportsAccount,
+  deleteSportModality,
+  deleteSportsAccount,
   findProfileByEmail,
   getAccountOverview,
+  listModalityPositions,
   listAllSportsAccounts,
   listSportModalities,
+  updateSportModality,
+  updateSportsAccount,
   upsertAccountMembership,
   updateSportsAccountBasics,
   type AccountOverview,
@@ -48,6 +55,16 @@ type AccountAccessItem = {
   membershipRole: AccountRole | null;
   priorityGroupName: string | null;
 };
+
+type AdminTab = "modalities" | "accounts";
+
+type AdminModalState =
+  | null
+  | {
+      type: "modality" | "account";
+      mode: "create" | "edit";
+      targetId?: string;
+    };
 
 function getReadableError(error: unknown) {
   if (error instanceof Error) {
@@ -92,16 +109,20 @@ function formatSchedule(weekday: number, startsAt: string, endsAt: string) {
 
 export default function HomeScreen() {
   const { profile, memberships, error, signOut, refresh } = useAuth();
+  const isSuperAdmin = Boolean(profile?.is_super_admin);
   const [superAdminAccounts, setSuperAdminAccounts] = useState<SportsAccount[]>([]);
   const [modalities, setModalities] = useState<SportModality[]>([]);
+  const [adminTab, setAdminTab] = useState<AdminTab>("accounts");
+  const [adminModal, setAdminModal] = useState<AdminModalState>(null);
+  const [isModalLoading, setIsModalLoading] = useState(false);
+  const [isSubmittingModal, setIsSubmittingModal] = useState(false);
+  const [deletingItemId, setDeletingItemId] = useState<string | null>(null);
   const [selectedAccountId, setSelectedAccountId] = useState<string | null>(null);
   const [overview, setOverview] = useState<AccountOverview | null>(null);
   const [overviewError, setOverviewError] = useState<string | null>(null);
   const [isOverviewLoading, setIsOverviewLoading] = useState(false);
   const [isAdminLoading, setIsAdminLoading] = useState(false);
   const [isSavingAccount, setIsSavingAccount] = useState(false);
-  const [isCreatingAccount, setIsCreatingAccount] = useState(false);
-  const [isCreatingModality, setIsCreatingModality] = useState(false);
   const [isLinkingMember, setIsLinkingMember] = useState(false);
   const [message, setMessage] = useState<{ tone: "success" | "error"; text: string } | null>(null);
 
@@ -134,12 +155,20 @@ export default function HomeScreen() {
   const [memberPriorityGroupId, setMemberPriorityGroupId] = useState<string | null>(null);
 
   useEffect(() => {
+    if (adminModal?.type === "account" && adminModal.mode === "edit") {
+      return;
+    }
+
     setCreateSlugDraft(slugify(createNameDraft));
-  }, [createNameDraft]);
+  }, [adminModal, createNameDraft]);
 
   useEffect(() => {
+    if (adminModal?.type === "modality" && adminModal.mode === "edit") {
+      return;
+    }
+
     setCreateModalitySlugDraft(slugify(createModalityNameDraft));
-  }, [createModalityNameDraft]);
+  }, [adminModal, createModalityNameDraft]);
 
   useEffect(() => {
     let isActive = true;
@@ -217,6 +246,7 @@ export default function HomeScreen() {
 
     return [...accountMap.values()].sort((a, b) => a.account.name.localeCompare(b.account.name));
   })();
+  const modalityNameById = new Map(modalities.map((modality) => [modality.id, modality.name]));
 
   const selectedAccess = availableAccounts.find((item) => item.account.id === selectedAccountId) ?? null;
   const selectedMembership = memberships.find((item) => item.account.id === selectedAccountId) ?? null;
@@ -333,6 +363,99 @@ export default function HomeScreen() {
     );
   }
 
+  function resetModalityForm() {
+    setCreateModalityNameDraft("");
+    setCreateModalitySlugDraft("");
+    setCreateModalityPlayersDraft("5");
+    setCreateModalityPositionsDraft("Goleiro, Zagueiro, Ala, Meio-campo, Atacante");
+  }
+
+  function resetAccountForm() {
+    setCreateNameDraft("");
+    setCreateSlugDraft("");
+    setCreateModalityId(modalities[0]?.id ?? null);
+    setCreateWeekday("3");
+    setCreateStartsAt("20:30");
+    setCreateEndsAt("22:00");
+    setCreateMaxPlayers("20");
+    setCreateOpenHours("48");
+    setCreateCloseMinutes("120");
+    setCreatePriorityGroups("Prioridade 1, Prioridade 2, Lista geral");
+  }
+
+  function closeAdminModal() {
+    setAdminModal(null);
+    setIsModalLoading(false);
+  }
+
+  function openCreateModalityModal() {
+    resetModalityForm();
+    setAdminModal({
+      type: "modality",
+      mode: "create",
+    });
+  }
+
+  async function openEditModalityModal(modality: SportModality) {
+    setAdminModal({
+      type: "modality",
+      mode: "edit",
+      targetId: modality.id,
+    });
+    setIsModalLoading(true);
+
+    try {
+      const positions = await listModalityPositions(modality.id);
+      setCreateModalityNameDraft(modality.name);
+      setCreateModalitySlugDraft(modality.slug);
+      setCreateModalityPlayersDraft(String(modality.players_per_team));
+      setCreateModalityPositionsDraft(positions.map((position) => position.name).join(", "));
+    } catch (loadError) {
+      setMessage({ tone: "error", text: getReadableError(loadError) });
+      setAdminModal(null);
+    } finally {
+      setIsModalLoading(false);
+    }
+  }
+
+  function openCreateAccountModal() {
+    resetAccountForm();
+    setAdminModal({
+      type: "account",
+      mode: "create",
+    });
+  }
+
+  async function openEditAccountModal(accountId: string) {
+    setAdminModal({
+      type: "account",
+      mode: "edit",
+      targetId: accountId,
+    });
+    setIsModalLoading(true);
+
+    try {
+      const accountOverview =
+        overview?.account.id === accountId ? overview : await getAccountOverview(accountId);
+
+      setCreateNameDraft(accountOverview.account.name);
+      setCreateSlugDraft(accountOverview.account.slug);
+      setCreateModalityId(accountOverview.account.modality_id);
+      setCreateWeekday(String(accountOverview.schedules[0]?.weekday ?? 3));
+      setCreateStartsAt(accountOverview.schedules[0]?.starts_at.slice(0, 5) ?? "20:30");
+      setCreateEndsAt(accountOverview.schedules[0]?.ends_at.slice(0, 5) ?? "22:00");
+      setCreateMaxPlayers(String(accountOverview.account.max_players_per_event));
+      setCreateOpenHours(String(accountOverview.account.confirmation_open_hours_before));
+      setCreateCloseMinutes(String(accountOverview.account.confirmation_close_minutes_before));
+      setCreatePriorityGroups(accountOverview.priorityGroups.map((group) => group.name).join(", "));
+    } catch (loadError) {
+      setMessage({ tone: "error", text: getReadableError(loadError) });
+      setAdminModal(null);
+    } finally {
+      setIsModalLoading(false);
+    }
+  }
+
   async function handleSaveAccount() {
     if (!overview) {
       return;
@@ -407,50 +530,80 @@ export default function HomeScreen() {
       confirmationCloseMinutesBefore < 0 ||
       priorityGroups.length === 0
     ) {
-      setMessage({ tone: "error", text: "Revise os dados da nova conta esportiva." });
+      setMessage({ tone: "error", text: "Revise os dados da conta esportiva." });
       return;
     }
 
-    setIsCreatingAccount(true);
+    setIsSubmittingModal(true);
     setMessage(null);
 
     try {
-      const createdAccount = await createSportsAccount({
-        createdBy: profile.id,
-        name: createNameDraft.trim(),
-        slug,
-        modalityId: createModalityId,
-        timezone: "America/Sao_Paulo",
-        maxPlayersPerEvent,
-        confirmationOpenHoursBefore,
-        confirmationCloseMinutesBefore,
-        autoNotifyConfirmationOpen: true,
-        autoNotifyWaitlistChanges: true,
-        autoNotifyEventUpdates: true,
-        schedule: {
-          weekday,
-          startsAt: createStartsAt,
-          endsAt: createEndsAt,
-        },
-        priorityGroups,
-      });
+      const isEditing = adminModal?.type === "account" && adminModal.mode === "edit" && adminModal.targetId;
+      let resolvedAccountId = adminModal?.targetId ?? null;
+
+      if (isEditing && resolvedAccountId) {
+        await updateSportsAccount({
+          accountId: resolvedAccountId,
+          name: createNameDraft.trim(),
+          slug,
+          modalityId: createModalityId,
+          timezone: "America/Sao_Paulo",
+          maxPlayersPerEvent,
+          confirmationOpenHoursBefore,
+          confirmationCloseMinutesBefore,
+          autoNotifyConfirmationOpen: true,
+          autoNotifyWaitlistChanges: true,
+          autoNotifyEventUpdates: true,
+          schedule: {
+            weekday,
+            startsAt: createStartsAt,
+            endsAt: createEndsAt,
+          },
+          priorityGroups,
+        });
+      } else {
+        const createdAccount = await createSportsAccount({
+          createdBy: profile.id,
+          name: createNameDraft.trim(),
+          slug,
+          modalityId: createModalityId,
+          timezone: "America/Sao_Paulo",
+          maxPlayersPerEvent,
+          confirmationOpenHoursBefore,
+          confirmationCloseMinutesBefore,
+          autoNotifyConfirmationOpen: true,
+          autoNotifyWaitlistChanges: true,
+          autoNotifyEventUpdates: true,
+          schedule: {
+            weekday,
+            startsAt: createStartsAt,
+            endsAt: createEndsAt,
+          },
+          priorityGroups,
+        });
+
+        resolvedAccountId = createdAccount.id;
+      }
 
       await reloadAccounts();
-      setSelectedAccountId(createdAccount.id);
-      setCreateNameDraft("");
-      setCreateSlugDraft("");
-      setCreateWeekday("3");
-      setCreateStartsAt("20:30");
-      setCreateEndsAt("22:00");
-      setCreateMaxPlayers("20");
-      setCreateOpenHours("48");
-      setCreateCloseMinutes("120");
-      setCreatePriorityGroups("Prioridade 1, Prioridade 2, Lista geral");
-      setMessage({ tone: "success", text: "Conta esportiva criada com sucesso." });
+      await refresh();
+
+      if (resolvedAccountId) {
+        setSelectedAccountId(resolvedAccountId);
+        setOverview(await getAccountOverview(resolvedAccountId));
+      }
+
+      closeAdminModal();
+      resetAccountForm();
+      setAdminTab("accounts");
+      setMessage({
+        tone: "success",
+        text: isEditing ? "Conta esportiva atualizada." : "Conta esportiva criada com sucesso.",
+      });
     } catch (createError) {
       setMessage({ tone: "error", text: getReadableError(createError) });
     } finally {
-      setIsCreatingAccount(false);
+      setIsSubmittingModal(false);
     }
   }
 
@@ -474,30 +627,123 @@ export default function HomeScreen() {
       return;
     }
 
-    setIsCreatingModality(true);
+    setIsSubmittingModal(true);
     setMessage(null);
 
     try {
-      const createdModality = await createSportModality({
-        createdBy: profile.id,
-        name: createModalityNameDraft.trim(),
-        slug,
-        playersPerTeam,
-        positions,
-      });
+      const isEditing = adminModal?.type === "modality" && adminModal.mode === "edit" && adminModal.targetId;
+      let createdModalityId: string | null = null;
+
+      if (isEditing && adminModal.targetId) {
+        await updateSportModality({
+          modalityId: adminModal.targetId,
+          name: createModalityNameDraft.trim(),
+          slug,
+          playersPerTeam,
+          positions,
+        });
+        createdModalityId = adminModal.targetId;
+      } else {
+        const createdModality = await createSportModality({
+          createdBy: profile.id,
+          name: createModalityNameDraft.trim(),
+          slug,
+          playersPerTeam,
+          positions,
+        });
+        createdModalityId = createdModality.id;
+      }
 
       await reloadModalities();
-      setCreateModalityId(createdModality.id);
-      setCreateModalityNameDraft("");
-      setCreateModalitySlugDraft("");
-      setCreateModalityPlayersDraft("5");
-      setCreateModalityPositionsDraft("Goleiro, Zagueiro, Ala, Meio-campo, Atacante");
-      setMessage({ tone: "success", text: "Modalidade esportiva cadastrada." });
+      setCreateModalityId(createdModalityId);
+      closeAdminModal();
+      resetModalityForm();
+      setAdminTab("modalities");
+
+      if (selectedAccess?.account.modality_id === createdModalityId && selectedAccess.account.id) {
+        setOverview(await getAccountOverview(selectedAccess.account.id));
+      }
+
+      setMessage({
+        tone: "success",
+        text: isEditing ? "Modalidade esportiva atualizada." : "Modalidade esportiva cadastrada.",
+      });
     } catch (createError) {
       setMessage({ tone: "error", text: getReadableError(createError) });
     } finally {
-      setIsCreatingModality(false);
+      setIsSubmittingModal(false);
     }
+  }
+
+  async function handleDeleteModality(modality: SportModality) {
+    setDeletingItemId(modality.id);
+    setMessage(null);
+
+    try {
+      await deleteSportModality(modality.id);
+      await reloadModalities();
+      setMessage({ tone: "success", text: "Modalidade esportiva excluida." });
+    } catch (deleteError) {
+      setMessage({ tone: "error", text: getReadableError(deleteError) });
+    } finally {
+      setDeletingItemId(null);
+    }
+  }
+
+  function confirmDeleteModality(modality: SportModality) {
+    Alert.alert(
+      "Excluir modalidade",
+      `Deseja excluir ${modality.name}? A exclusao pode falhar se houver contas esportivas usando essa modalidade.`,
+      [
+        { text: "Cancelar", style: "cancel" },
+        {
+          text: "Excluir",
+          style: "destructive",
+          onPress: () => {
+            void handleDeleteModality(modality);
+          },
+        },
+      ],
+    );
+  }
+
+  async function handleDeleteAccount(account: SportsAccount) {
+    setDeletingItemId(account.id);
+    setMessage(null);
+
+    try {
+      await deleteSportsAccount(account.id);
+      await reloadAccounts();
+      await refresh();
+
+      if (selectedAccountId === account.id) {
+        setSelectedAccountId(null);
+        setOverview(null);
+      }
+
+      setMessage({ tone: "success", text: "Conta esportiva excluida." });
+    } catch (deleteError) {
+      setMessage({ tone: "error", text: getReadableError(deleteError) });
+    } finally {
+      setDeletingItemId(null);
+    }
+  }
+
+  function confirmDeleteAccount(account: SportsAccount) {
+    Alert.alert(
+      "Excluir conta esportiva",
+      `Deseja excluir ${account.name}? Eventos, grupos prioritarios e vinculos dessa conta serao removidos junto.`,
+      [
+        { text: "Cancelar", style: "cancel" },
+        {
+          text: "Excluir",
+          style: "destructive",
+          onPress: () => {
+            void handleDeleteAccount(account);
+          },
+        },
+      ],
+    );
   }
 
   async function handleLinkMember() {
@@ -556,13 +802,360 @@ export default function HomeScreen() {
     }
   }
 
+  function renderSuperAdminManagement() {
+    return (
+      <View style={styles.section}>
+        <View style={styles.tabRow}>
+          <Pressable
+            onPress={() => setAdminTab("accounts")}
+            style={[styles.tabButton, adminTab === "accounts" && styles.tabButtonActive]}>
+            <Text style={[styles.tabText, adminTab === "accounts" && styles.tabTextActive]}>
+              Contas esportivas
+            </Text>
+          </Pressable>
+          <Pressable
+            onPress={() => setAdminTab("modalities")}
+            style={[styles.tabButton, adminTab === "modalities" && styles.tabButtonActive]}>
+            <Text style={[styles.tabText, adminTab === "modalities" && styles.tabTextActive]}>
+              Modalidades esportivas
+            </Text>
+          </Pressable>
+        </View>
+
+        {adminTab === "accounts" ? (
+          <View style={styles.panel}>
+            <View style={styles.inlineHeader}>
+              <View style={styles.inlineHeaderContent}>
+                <Text style={styles.panelTitle}>Cadastro de conta esportiva</Text>
+                <Text style={styles.panelText}>
+                  Liste, edite, exclua ou crie uma nova conta esportiva.
+                </Text>
+              </View>
+              <Pressable onPress={openCreateAccountModal} style={styles.secondaryButton}>
+                <Text style={styles.secondaryButtonText}>Nova conta</Text>
+              </Pressable>
+            </View>
+
+            {superAdminAccounts.length > 0 ? (
+              superAdminAccounts.map((account) => (
+                <View
+                  key={account.id}
+                  style={[
+                    styles.listCard,
+                    selectedAccountId === account.id && styles.listCardSelected,
+                  ]}>
+                  <View style={styles.listCardHeader}>
+                    <View style={styles.flex}>
+                      <Text style={styles.panelTitle}>{account.name}</Text>
+                      <Text style={styles.panelText}>
+                        {modalityNameById.get(account.modality_id) ?? "Modalidade sem nome"} | limite{" "}
+                        {account.max_players_per_event}
+                      </Text>
+                    </View>
+                    <View style={styles.listActions}>
+                      <Pressable
+                        onPress={() => setSelectedAccountId(account.id)}
+                        style={styles.inlineActionButton}>
+                        <Text style={styles.inlineActionText}>Abrir</Text>
+                      </Pressable>
+                      <Pressable
+                        onPress={() => void openEditAccountModal(account.id)}
+                        style={styles.inlineActionButton}>
+                        <Text style={styles.inlineActionText}>Editar</Text>
+                      </Pressable>
+                      <Pressable
+                        onPress={() => confirmDeleteAccount(account)}
+                        disabled={deletingItemId === account.id}
+                        style={[styles.inlineDangerButton, deletingItemId === account.id && styles.buttonDisabled]}>
+                        <Text style={styles.inlineDangerText}>
+                          {deletingItemId === account.id ? "Excluindo..." : "Excluir"}
+                        </Text>
+                      </Pressable>
+                    </View>
+                  </View>
+                </View>
+              ))
+            ) : (
+              <Text style={styles.panelText}>Nenhuma conta esportiva cadastrada ainda.</Text>
+            )}
+          </View>
+        ) : (
+          <View style={styles.panel}>
+            <View style={styles.inlineHeader}>
+              <View style={styles.inlineHeaderContent}>
+                <Text style={styles.panelTitle}>Cadastro de modalidade esportiva</Text>
+                <Text style={styles.panelText}>
+                  Mantenha a lista de modalidades e ajuste jogadores por equipe e posicoes.
+                </Text>
+              </View>
+              <Pressable onPress={openCreateModalityModal} style={styles.secondaryButton}>
+                <Text style={styles.secondaryButtonText}>Nova modalidade</Text>
+              </Pressable>
+            </View>
+
+            {modalities.length > 0 ? (
+              modalities.map((modality) => (
+                <View key={modality.id} style={styles.listCard}>
+                  <View style={styles.listCardHeader}>
+                    <View style={styles.flex}>
+                      <Text style={styles.panelTitle}>{modality.name}</Text>
+                      <Text style={styles.panelText}>
+                        slug {modality.slug} | {modality.players_per_team} jogadores por equipe
+                      </Text>
+                    </View>
+                    <View style={styles.listActions}>
+                      <Pressable
+                        onPress={() => void openEditModalityModal(modality)}
+                        style={styles.inlineActionButton}>
+                        <Text style={styles.inlineActionText}>Editar</Text>
+                      </Pressable>
+                      <Pressable
+                        onPress={() => confirmDeleteModality(modality)}
+                        disabled={deletingItemId === modality.id}
+                        style={[styles.inlineDangerButton, deletingItemId === modality.id && styles.buttonDisabled]}>
+                        <Text style={styles.inlineDangerText}>
+                          {deletingItemId === modality.id ? "Excluindo..." : "Excluir"}
+                        </Text>
+                      </Pressable>
+                    </View>
+                  </View>
+                </View>
+              ))
+            ) : (
+              <Text style={styles.panelText}>Nenhuma modalidade esportiva cadastrada ainda.</Text>
+            )}
+          </View>
+        )}
+      </View>
+    );
+  }
+
+  function renderAdminModal() {
+    if (!adminModal) {
+      return null;
+    }
+
+    const isModalityModal = adminModal.type === "modality";
+    const title =
+      adminModal.mode === "create"
+        ? isModalityModal
+          ? "Nova modalidade esportiva"
+          : "Nova conta esportiva"
+        : isModalityModal
+          ? "Editar modalidade esportiva"
+          : "Editar conta esportiva";
+
+    return (
+      <Modal
+        animationType="fade"
+        visible
+        transparent
+        onRequestClose={closeAdminModal}>
+        <View style={styles.modalBackdrop}>
+          <View style={styles.modalCard}>
+            <View style={styles.inlineHeader}>
+              <Text style={styles.modalTitle}>{title}</Text>
+              <Pressable onPress={closeAdminModal} style={styles.secondaryButton}>
+                <Text style={styles.secondaryButtonText}>Fechar</Text>
+              </Pressable>
+            </View>
+
+            {isModalLoading ? (
+              <View style={styles.modalLoading}>
+                <ActivityIndicator color={Colors.tint} />
+                <Text style={styles.panelText}>Carregando dados para edicao...</Text>
+              </View>
+            ) : (
+              <ScrollView contentContainerStyle={styles.modalContent}>
+                {isModalityModal ? (
+                  <>
+                    <TextInput
+                      value={createModalityNameDraft}
+                      onChangeText={setCreateModalityNameDraft}
+                      placeholder="Nome da modalidade"
+                      placeholderTextColor={Colors.textMuted}
+                      style={styles.input}
+                    />
+                    <TextInput
+                      value={createModalitySlugDraft}
+                      onChangeText={(value) => setCreateModalitySlugDraft(slugify(value))}
+                      placeholder="futebol-society"
+                      placeholderTextColor={Colors.textMuted}
+                      style={styles.input}
+                      autoCapitalize="none"
+                    />
+                    <TextInput
+                      value={createModalityPlayersDraft}
+                      onChangeText={setCreateModalityPlayersDraft}
+                      placeholder="Jogadores por equipe"
+                      placeholderTextColor={Colors.textMuted}
+                      keyboardType="number-pad"
+                      style={styles.input}
+                    />
+                    <TextInput
+                      value={createModalityPositionsDraft}
+                      onChangeText={setCreateModalityPositionsDraft}
+                      placeholder="Goleiro, Zagueiro, Ala, Atacante"
+                      placeholderTextColor={Colors.textMuted}
+                      style={[styles.input, styles.multiline]}
+                      multiline
+                    />
+                    <Pressable
+                      onPress={() => void handleCreateModality()}
+                      disabled={isSubmittingModal}
+                      style={[styles.primaryButton, isSubmittingModal && styles.buttonDisabled]}>
+                      {isSubmittingModal ? (
+                        <ActivityIndicator color="#ffffff" />
+                      ) : (
+                        <Text style={styles.primaryButtonText}>
+                          {adminModal.mode === "create" ? "Criar modalidade" : "Salvar modalidade"}
+                        </Text>
+                      )}
+                    </Pressable>
+                  </>
+                ) : (
+                  <>
+                    <TextInput
+                      value={createNameDraft}
+                      onChangeText={setCreateNameDraft}
+                      placeholder="Nome da conta"
+                      placeholderTextColor={Colors.textMuted}
+                      style={styles.input}
+                    />
+                    <TextInput
+                      value={createSlugDraft}
+                      onChangeText={(value) => setCreateSlugDraft(slugify(value))}
+                      placeholder="slug-da-conta"
+                      placeholderTextColor={Colors.textMuted}
+                      style={styles.input}
+                      autoCapitalize="none"
+                    />
+
+                    <Text style={styles.label}>Modalidade</Text>
+                    <View style={styles.chips}>
+                      {modalities.map((modality) => (
+                        <Pressable
+                          key={modality.id}
+                          onPress={() => setCreateModalityId(modality.id)}
+                          style={[
+                            styles.chip,
+                            createModalityId === modality.id && styles.chipSelected,
+                          ]}>
+                          <Text
+                            style={[
+                              styles.chipText,
+                              createModalityId === modality.id && styles.chipTextSelected,
+                            ]}>
+                            {modality.name}
+                          </Text>
+                        </Pressable>
+                      ))}
+                    </View>
+
+                    <Text style={styles.label}>Dia da semana</Text>
+                    <View style={styles.chips}>
+                      {weekdayLabels.map((weekday, index) => (
+                        <Pressable
+                          key={weekday}
+                          onPress={() => setCreateWeekday(String(index))}
+                          style={[
+                            styles.chip,
+                            createWeekday === String(index) && styles.chipSelected,
+                          ]}>
+                          <Text
+                            style={[
+                              styles.chipText,
+                              createWeekday === String(index) && styles.chipTextSelected,
+                            ]}>
+                            {weekday}
+                          </Text>
+                        </Pressable>
+                      ))}
+                    </View>
+
+                    <View style={styles.row}>
+                      <TextInput
+                        value={createStartsAt}
+                        onChangeText={setCreateStartsAt}
+                        placeholder="20:30"
+                        placeholderTextColor={Colors.textMuted}
+                        style={[styles.input, styles.flex]}
+                      />
+                      <TextInput
+                        value={createEndsAt}
+                        onChangeText={setCreateEndsAt}
+                        placeholder="22:00"
+                        placeholderTextColor={Colors.textMuted}
+                        style={[styles.input, styles.flex]}
+                      />
+                    </View>
+
+                    <View style={styles.row}>
+                      <TextInput
+                        value={createMaxPlayers}
+                        onChangeText={setCreateMaxPlayers}
+                        placeholder="Maximo"
+                        placeholderTextColor={Colors.textMuted}
+                        keyboardType="number-pad"
+                        style={[styles.input, styles.flex]}
+                      />
+                      <TextInput
+                        value={createOpenHours}
+                        onChangeText={setCreateOpenHours}
+                        placeholder="Abre (h)"
+                        placeholderTextColor={Colors.textMuted}
+                        keyboardType="number-pad"
+                        style={[styles.input, styles.flex]}
+                      />
+                      <TextInput
+                        value={createCloseMinutes}
+                        onChangeText={setCreateCloseMinutes}
+                        placeholder="Fecha (min)"
+                        placeholderTextColor={Colors.textMuted}
+                        keyboardType="number-pad"
+                        style={[styles.input, styles.flex]}
+                      />
+                    </View>
+
+                    <TextInput
+                      value={createPriorityGroups}
+                      onChangeText={setCreatePriorityGroups}
+                      placeholder="Prioridade 1, Prioridade 2, Lista geral"
+                      placeholderTextColor={Colors.textMuted}
+                      style={[styles.input, styles.multiline]}
+                      multiline
+                    />
+
+                    <Pressable
+                      onPress={() => void handleCreateAccount()}
+                      disabled={isSubmittingModal}
+                      style={[styles.primaryButton, isSubmittingModal && styles.buttonDisabled]}>
+                      {isSubmittingModal ? (
+                        <ActivityIndicator color="#ffffff" />
+                      ) : (
+                        <Text style={styles.primaryButtonText}>
+                          {adminModal.mode === "create" ? "Criar conta" : "Salvar conta"}
+                        </Text>
+                      )}
+                    </Pressable>
+                  </>
+                )}
+              </ScrollView>
+            )}
+          </View>
+        </View>
+      </Modal>
+    );
+  }
+
   const canManageAccount = Boolean(
     profile?.is_super_admin || selectedMembership?.membership.role === "group_admin",
   );
 
   return (
-    <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
-      <View style={styles.hero}>
+    <>
+      <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
+        <View style={styles.hero}>
         <Text style={styles.kicker}>Conta conectada</Text>
         <Text style={styles.heroTitle}>{profile?.full_name || "Usuario autenticado"}</Text>
         <Text style={styles.heroSubtitle}>
@@ -584,205 +1177,16 @@ export default function HomeScreen() {
         </View>
       </View>
 
-      {profile?.is_super_admin ? (
-        <>
-          <View style={styles.panel}>
-            <Text style={styles.panelTitle}>Cadastrar modalidade esportiva</Text>
-            <Text style={styles.panelText}>
-              Defina a modalidade base e as posicoes que poderao ser escolhidas nos perfis.
-            </Text>
-
-            <TextInput
-              value={createModalityNameDraft}
-              onChangeText={setCreateModalityNameDraft}
-              placeholder="Nome da modalidade"
-              placeholderTextColor={Colors.textMuted}
-              style={styles.input}
-            />
-            <TextInput
-              value={createModalitySlugDraft}
-              onChangeText={(value) => setCreateModalitySlugDraft(slugify(value))}
-              placeholder="futebol-society"
-              placeholderTextColor={Colors.textMuted}
-              style={styles.input}
-              autoCapitalize="none"
-            />
-            <TextInput
-              value={createModalityPlayersDraft}
-              onChangeText={setCreateModalityPlayersDraft}
-              placeholder="Jogadores por equipe"
-              placeholderTextColor={Colors.textMuted}
-              keyboardType="number-pad"
-              style={styles.input}
-            />
-            <TextInput
-              value={createModalityPositionsDraft}
-              onChangeText={setCreateModalityPositionsDraft}
-              placeholder="Goleiro, Zagueiro, Ala, Atacante"
-              placeholderTextColor={Colors.textMuted}
-              style={[styles.input, styles.multiline]}
-              multiline
-            />
-
-            <Pressable
-              onPress={() => void handleCreateModality()}
-              disabled={isCreatingModality || isAdminLoading}
-              style={[
-                styles.primaryButton,
-                (isCreatingModality || isAdminLoading) && styles.buttonDisabled,
-              ]}>
-              {isCreatingModality ? (
-                <ActivityIndicator color="#ffffff" />
-              ) : (
-                <Text style={styles.primaryButtonText}>Cadastrar modalidade</Text>
-              )}
-            </Pressable>
-          </View>
-
-          <View style={styles.panel}>
-            <Text style={styles.panelTitle}>Criar conta esportiva</Text>
-            <Text style={styles.panelText}>
-              Crie a conta primeiro. Depois associe os outros usuarios a ela.
-            </Text>
-
-            <TextInput
-              value={createNameDraft}
-              onChangeText={setCreateNameDraft}
-              placeholder="Nome da conta"
-              placeholderTextColor={Colors.textMuted}
-              style={styles.input}
-            />
-            <TextInput
-              value={createSlugDraft}
-              onChangeText={(value) => setCreateSlugDraft(slugify(value))}
-              placeholder="slug-da-conta"
-              placeholderTextColor={Colors.textMuted}
-              style={styles.input}
-              autoCapitalize="none"
-            />
-
-            <Text style={styles.label}>Modalidade</Text>
-            <View style={styles.chips}>
-              {modalities.map((modality) => (
-                <Pressable
-                  key={modality.id}
-                  onPress={() => setCreateModalityId(modality.id)}
-                  style={[
-                    styles.chip,
-                    createModalityId === modality.id && styles.chipSelected,
-                  ]}>
-                  <Text
-                    style={[
-                      styles.chipText,
-                      createModalityId === modality.id && styles.chipTextSelected,
-                    ]}>
-                    {modality.name}
-                  </Text>
-                </Pressable>
-              ))}
-            </View>
-
-            <Text style={styles.label}>Dia da semana</Text>
-            <View style={styles.chips}>
-              {weekdayLabels.map((weekday, index) => (
-                <Pressable
-                  key={weekday}
-                  onPress={() => setCreateWeekday(String(index))}
-                  style={[
-                    styles.chip,
-                    createWeekday === String(index) && styles.chipSelected,
-                  ]}>
-                  <Text
-                    style={[
-                      styles.chipText,
-                      createWeekday === String(index) && styles.chipTextSelected,
-                    ]}>
-                    {weekday}
-                  </Text>
-                </Pressable>
-              ))}
-            </View>
-
-            <View style={styles.row}>
-              <TextInput
-                value={createStartsAt}
-                onChangeText={setCreateStartsAt}
-                placeholder="20:30"
-                placeholderTextColor={Colors.textMuted}
-                style={[styles.input, styles.flex]}
-              />
-              <TextInput
-                value={createEndsAt}
-                onChangeText={setCreateEndsAt}
-                placeholder="22:00"
-                placeholderTextColor={Colors.textMuted}
-                style={[styles.input, styles.flex]}
-              />
-            </View>
-
-            <View style={styles.row}>
-              <TextInput
-                value={createMaxPlayers}
-                onChangeText={setCreateMaxPlayers}
-                placeholder="Maximo"
-                placeholderTextColor={Colors.textMuted}
-                keyboardType="number-pad"
-                style={[styles.input, styles.flex]}
-              />
-              <TextInput
-                value={createOpenHours}
-                onChangeText={setCreateOpenHours}
-                placeholder="Abre (h)"
-                placeholderTextColor={Colors.textMuted}
-                keyboardType="number-pad"
-                style={[styles.input, styles.flex]}
-              />
-              <TextInput
-                value={createCloseMinutes}
-                onChangeText={setCreateCloseMinutes}
-                placeholder="Fecha (min)"
-                placeholderTextColor={Colors.textMuted}
-                keyboardType="number-pad"
-                style={[styles.input, styles.flex]}
-              />
-            </View>
-
-            <TextInput
-              value={createPriorityGroups}
-              onChangeText={setCreatePriorityGroups}
-              placeholder="Prioridade 1, Prioridade 2, Lista geral"
-              placeholderTextColor={Colors.textMuted}
-              style={[styles.input, styles.multiline]}
-              multiline
-            />
-
-            <Pressable
-              onPress={() => void handleCreateAccount()}
-              disabled={isCreatingAccount || isAdminLoading}
-              style={[
-                styles.primaryButton,
-                (isCreatingAccount || isAdminLoading) && styles.buttonDisabled,
-              ]}>
-              {isCreatingAccount ? (
-                <ActivityIndicator color="#ffffff" />
-              ) : (
-                <Text style={styles.primaryButtonText}>Criar conta esportiva</Text>
-              )}
-            </Pressable>
-          </View>
-        </>
-      ) : null}
-
       <View style={styles.sectionHeader}>
         <Text style={styles.sectionTitle}>
-          {profile?.is_super_admin ? "Contas esportivas" : "Vinculos do usuario"}
+          {isSuperAdmin ? "Gestao do super admin" : "Vinculos do usuario"}
         </Text>
         <Pressable onPress={() => void signOut()} style={styles.secondaryButton}>
           <Text style={styles.secondaryButtonText}>Sair</Text>
         </Pressable>
       </View>
 
-      {availableAccounts.length > 0 ? (
+      {isSuperAdmin ? renderSuperAdminManagement() : availableAccounts.length > 0 ? (
         availableAccounts.map((item) => (
           <Pressable
             key={item.account.id}
@@ -815,7 +1219,7 @@ export default function HomeScreen() {
 
       {selectedAccess ? (
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Conta ativa</Text>
+          <Text style={styles.sectionTitle}>{isSuperAdmin ? "Conta selecionada" : "Conta ativa"}</Text>
 
           {isOverviewLoading && !overview ? (
             <View style={styles.panel}>
@@ -939,7 +1343,7 @@ export default function HomeScreen() {
                 </View>
               ) : null}
 
-              {canManageAccount ? (
+              {!isSuperAdmin && canManageAccount ? (
                 <View style={styles.panel}>
                   <Text style={styles.panelTitle}>Editar conta esportiva</Text>
                   <TextInput
@@ -984,22 +1388,24 @@ export default function HomeScreen() {
         </View>
       ) : null}
 
-      {error || overviewError || message ? (
-        <View
-          style={[
-            styles.messageCard,
-            message?.tone === "success" ? styles.messageSuccess : styles.messageError,
-          ]}>
-          <Text
+        {error || overviewError || message ? (
+          <View
             style={[
-              styles.messageText,
-              message?.tone === "success" ? styles.messageTextSuccess : styles.messageTextError,
+              styles.messageCard,
+              message?.tone === "success" ? styles.messageSuccess : styles.messageError,
             ]}>
-            {message?.text ?? error ?? overviewError}
-          </Text>
-        </View>
-      ) : null}
-    </ScrollView>
+            <Text
+              style={[
+                styles.messageText,
+                message?.tone === "success" ? styles.messageTextSuccess : styles.messageTextError,
+              ]}>
+              {message?.text ?? error ?? overviewError}
+            </Text>
+          </View>
+        ) : null}
+      </ScrollView>
+      {renderAdminModal()}
+    </>
   );
 }
 
@@ -1034,6 +1440,30 @@ const styles = StyleSheet.create({
   section: { gap: 12 },
   sectionHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
   sectionTitle: { color: Colors.text, fontSize: 18, fontWeight: "800" },
+  tabRow: {
+    flexDirection: "row",
+    borderRadius: 18,
+    backgroundColor: Colors.surfaceMuted,
+    padding: 4,
+    gap: 4,
+  },
+  tabButton: {
+    flex: 1,
+    alignItems: "center",
+    borderRadius: 14,
+    paddingVertical: 12,
+  },
+  tabButtonActive: {
+    backgroundColor: Colors.surface,
+  },
+  tabText: {
+    color: Colors.textMuted,
+    fontSize: 13,
+    fontWeight: "800",
+  },
+  tabTextActive: {
+    color: Colors.text,
+  },
   panel: {
     borderRadius: 24,
     backgroundColor: Colors.surface,
@@ -1045,6 +1475,59 @@ const styles = StyleSheet.create({
   panelSelected: { borderColor: Colors.tint, backgroundColor: "#f3f9ef" },
   panelTitle: { color: Colors.text, fontSize: 16, fontWeight: "800" },
   panelText: { color: Colors.textMuted, fontSize: 14, lineHeight: 21 },
+  inlineHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+  },
+  inlineHeaderContent: {
+    flex: 1,
+    gap: 4,
+  },
+  listCard: {
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    backgroundColor: Colors.background,
+    padding: 14,
+    gap: 10,
+  },
+  listCardSelected: {
+    borderColor: Colors.tint,
+    backgroundColor: "#f3f9ef",
+  },
+  listCardHeader: {
+    flexDirection: "row",
+    gap: 12,
+    alignItems: "center",
+  },
+  listActions: {
+    alignItems: "flex-end",
+    gap: 8,
+  },
+  inlineActionButton: {
+    borderRadius: 999,
+    backgroundColor: Colors.surfaceMuted,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  inlineActionText: {
+    color: Colors.text,
+    fontSize: 12,
+    fontWeight: "800",
+  },
+  inlineDangerButton: {
+    borderRadius: 999,
+    backgroundColor: "#fde9e6",
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  inlineDangerText: {
+    color: "#a43a26",
+    fontSize: 12,
+    fontWeight: "800",
+  },
   input: {
     borderRadius: 16,
     borderWidth: 1,
@@ -1109,6 +1592,36 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
   },
   tagText: { color: Colors.tint, fontSize: 12, fontWeight: "800" },
+  modalBackdrop: {
+    flex: 1,
+    backgroundColor: "rgba(8, 19, 14, 0.48)",
+    justifyContent: "center",
+    padding: 20,
+  },
+  modalCard: {
+    maxHeight: "88%",
+    borderRadius: 28,
+    backgroundColor: Colors.surface,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    padding: 20,
+    gap: 16,
+  },
+  modalTitle: {
+    color: Colors.text,
+    fontSize: 20,
+    fontWeight: "900",
+  },
+  modalContent: {
+    gap: 12,
+    paddingBottom: 12,
+  },
+  modalLoading: {
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 12,
+    paddingVertical: 32,
+  },
   messageCard: { borderRadius: 16, padding: 14 },
   messageError: { backgroundColor: "#fff2e6" },
   messageSuccess: { backgroundColor: "#e8f6ea" },
