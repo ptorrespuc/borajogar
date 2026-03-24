@@ -25,6 +25,13 @@ export type RosterMember = {
   preferredPositions: ModalityPosition[];
 };
 
+export type AccountMembershipAdminItem = {
+  membership: AccountMembership;
+  account: SportsAccount;
+  profile: Profile;
+  priorityGroup: AccountPriorityGroup | null;
+};
+
 export type CreateSportsAccountInput = {
   createdBy: string;
   name: string;
@@ -134,6 +141,99 @@ export async function findProfileByEmail(email: string): Promise<Profile | null>
 
   throwIfError(error);
   return (data as Profile | null) ?? null;
+}
+
+export async function listAllAccountMemberships(): Promise<AccountMembershipAdminItem[]> {
+  const { data: membershipData, error: membershipError } = await supabase
+    .from("account_memberships")
+    .select(
+      "id, account_id, profile_id, role, priority_group_id, is_active, joined_at, created_at, updated_at",
+    )
+    .eq("is_active", true)
+    .order("joined_at", { ascending: true });
+
+  throwIfError(membershipError);
+
+  const memberships = (membershipData ?? []) as AccountMembership[];
+
+  if (memberships.length === 0) {
+    return [];
+  }
+
+  const accountIds = [...new Set(memberships.map((membership) => membership.account_id))];
+  const profileIds = [...new Set(memberships.map((membership) => membership.profile_id))];
+  const priorityGroupIds = [
+    ...new Set(
+      memberships
+        .map((membership) => membership.priority_group_id)
+        .filter((value): value is string => Boolean(value)),
+    ),
+  ];
+
+  const [
+    { data: accountData, error: accountError },
+    { data: profileData, error: profileError },
+    { data: priorityGroupData, error: priorityGroupError },
+  ] = await Promise.all([
+    supabase
+      .from("sports_accounts")
+      .select(
+        "id, name, slug, modality_id, timezone, max_players_per_event, confirmation_open_hours_before, confirmation_close_minutes_before, auto_notify_confirmation_open, auto_notify_waitlist_changes, auto_notify_event_updates, created_by, created_at, updated_at",
+      )
+      .in("id", accountIds),
+    supabase
+      .from("profiles")
+      .select("id, full_name, email, photo_url, is_super_admin, created_at, updated_at")
+      .in("id", profileIds),
+    priorityGroupIds.length > 0
+      ? supabase
+          .from("account_priority_groups")
+          .select("id, account_id, name, priority_rank, color_hex, is_active, created_at, updated_at")
+          .in("id", priorityGroupIds)
+      : Promise.resolve({
+          data: [] as AccountPriorityGroup[],
+          error: null as { message: string } | null,
+        }),
+  ]);
+
+  throwIfError(accountError);
+  throwIfError(profileError);
+  throwIfError(priorityGroupError);
+
+  const accountMap = new Map(((accountData ?? []) as SportsAccount[]).map((account) => [account.id, account]));
+  const profileMap = new Map(((profileData ?? []) as Profile[]).map((profile) => [profile.id, profile]));
+  const priorityGroupMap = new Map(
+    ((priorityGroupData ?? []) as AccountPriorityGroup[]).map((group) => [group.id, group]),
+  );
+
+  return memberships
+    .map((membership) => {
+      const account = accountMap.get(membership.account_id);
+      const profile = profileMap.get(membership.profile_id);
+
+      if (!account || !profile) {
+        return null;
+      }
+
+      return {
+        membership,
+        account,
+        profile,
+        priorityGroup: membership.priority_group_id
+          ? priorityGroupMap.get(membership.priority_group_id) ?? null
+          : null,
+      } satisfies AccountMembershipAdminItem;
+    })
+    .filter((item): item is AccountMembershipAdminItem => item !== null)
+    .sort((first, second) => {
+      const accountOrder = first.account.name.localeCompare(second.account.name);
+
+      if (accountOrder !== 0) {
+        return accountOrder;
+      }
+
+      return first.profile.full_name.localeCompare(second.profile.full_name);
+    });
 }
 
 export async function getAccountOverview(accountId: string): Promise<AccountOverview> {
@@ -678,6 +778,18 @@ export async function upsertAccountMembership(input: {
       onConflict: "account_id,profile_id",
     },
   );
+
+  throwIfError(error);
+}
+
+export async function deactivateAccountMembership(membershipId: string) {
+  const { error } = await supabase
+    .from("account_memberships")
+    .update({
+      is_active: false,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", membershipId);
 
   throwIfError(error);
 }

@@ -13,11 +13,14 @@ import {
 
 import Colors from "@/constants/Colors";
 import {
+  deactivateAccountMembership,
+  type AccountMembershipAdminItem,
   createSportModality,
   createSportsAccount,
   deleteSportModality,
   deleteSportsAccount,
   findProfileByEmail,
+  listAllAccountMemberships,
   getAccountOverview,
   listModalityPositions,
   listAllSportsAccounts,
@@ -56,12 +59,12 @@ type AccountAccessItem = {
   priorityGroupName: string | null;
 };
 
-type AdminTab = "modalities" | "accounts";
+type AdminTab = "modalities" | "accounts" | "memberships";
 
 type AdminModalState =
   | null
   | {
-      type: "modality" | "account";
+      type: "modality" | "account" | "membership";
       mode: "create" | "edit";
       targetId?: string;
     };
@@ -112,6 +115,7 @@ export default function HomeScreen() {
   const isSuperAdmin = Boolean(profile?.is_super_admin);
   const [superAdminAccounts, setSuperAdminAccounts] = useState<SportsAccount[]>([]);
   const [modalities, setModalities] = useState<SportModality[]>([]);
+  const [adminMemberships, setAdminMemberships] = useState<AccountMembershipAdminItem[]>([]);
   const [adminTab, setAdminTab] = useState<AdminTab>("accounts");
   const [adminModal, setAdminModal] = useState<AdminModalState>(null);
   const [isModalLoading, setIsModalLoading] = useState(false);
@@ -123,7 +127,6 @@ export default function HomeScreen() {
   const [isOverviewLoading, setIsOverviewLoading] = useState(false);
   const [isAdminLoading, setIsAdminLoading] = useState(false);
   const [isSavingAccount, setIsSavingAccount] = useState(false);
-  const [isLinkingMember, setIsLinkingMember] = useState(false);
   const [message, setMessage] = useState<{ tone: "success" | "error"; text: string } | null>(null);
 
   const [accountNameDraft, setAccountNameDraft] = useState("");
@@ -150,9 +153,16 @@ export default function HomeScreen() {
   const [createPriorityGroups, setCreatePriorityGroups] = useState(
     "Prioridade 1, Prioridade 2, Lista geral",
   );
-  const [memberEmailDraft, setMemberEmailDraft] = useState("");
-  const [memberRoleDraft, setMemberRoleDraft] = useState<AccountRole>("player");
-  const [memberPriorityGroupId, setMemberPriorityGroupId] = useState<string | null>(null);
+  const [membershipAccountIdDraft, setMembershipAccountIdDraft] = useState<string | null>(null);
+  const [membershipEmailDraft, setMembershipEmailDraft] = useState("");
+  const [membershipRoleModalDraft, setMembershipRoleModalDraft] = useState<AccountRole>("player");
+  const [membershipPriorityGroupModalId, setMembershipPriorityGroupModalId] = useState<string | null>(null);
+  const [membershipProfileIdDraft, setMembershipProfileIdDraft] = useState<string | null>(null);
+  const [membershipPriorityOptions, setMembershipPriorityOptions] = useState<Array<{
+    id: string;
+    name: string;
+    priority_rank: number;
+  }>>([]);
 
   useEffect(() => {
     if (adminModal?.type === "account" && adminModal.mode === "edit") {
@@ -177,6 +187,7 @@ export default function HomeScreen() {
       if (!profile?.is_super_admin) {
         setSuperAdminAccounts([]);
         setModalities([]);
+        setAdminMemberships([]);
         setCreateModalityId(null);
         return;
       }
@@ -184,9 +195,10 @@ export default function HomeScreen() {
       setIsAdminLoading(true);
 
       try {
-        const [nextAccounts, nextModalities] = await Promise.all([
+        const [nextAccounts, nextModalities, nextMemberships] = await Promise.all([
           listAllSportsAccounts(),
           listSportModalities(),
+          listAllAccountMemberships(),
         ]);
 
         if (!isActive) {
@@ -195,6 +207,7 @@ export default function HomeScreen() {
 
         setSuperAdminAccounts(nextAccounts);
         setModalities(nextModalities);
+        setAdminMemberships(nextMemberships);
 
         if (nextModalities.length === 0) {
           setCreateModalityId(null);
@@ -318,22 +331,66 @@ export default function HomeScreen() {
   }, [overview]);
 
   useEffect(() => {
-    if (memberRoleDraft !== "player") {
-      setMemberPriorityGroupId(null);
+    if (adminModal?.type !== "membership" || adminModal.mode !== "create") {
       return;
     }
 
-    if (!overview || overview.priorityGroups.length === 0) {
-      setMemberPriorityGroupId(null);
+    if (!membershipAccountIdDraft) {
+      setMembershipPriorityOptions([]);
+      setMembershipPriorityGroupModalId(null);
       return;
     }
 
-    setMemberPriorityGroupId((currentValue) =>
-      currentValue && overview.priorityGroups.some((group) => group.id === currentValue)
+    const accountId = membershipAccountIdDraft;
+    let isActive = true;
+
+    async function syncPriorityGroups() {
+      try {
+        const accountOverview = await getAccountOverview(accountId);
+
+        if (!isActive) {
+          return;
+        }
+
+        const priorityOptions = accountOverview.priorityGroups.map((group) => ({
+          id: group.id,
+          name: group.name,
+          priority_rank: group.priority_rank,
+        }));
+
+        setMembershipPriorityOptions(priorityOptions);
+        setMembershipPriorityGroupModalId(priorityOptions[0]?.id ?? null);
+      } catch (loadError) {
+        if (isActive) {
+          setMessage({ tone: "error", text: getReadableError(loadError) });
+        }
+      }
+    }
+
+    void syncPriorityGroups();
+
+    return () => {
+      isActive = false;
+    };
+  }, [adminModal, membershipAccountIdDraft]);
+
+  useEffect(() => {
+    if (membershipRoleModalDraft !== "player") {
+      setMembershipPriorityGroupModalId(null);
+      return;
+    }
+
+    if (membershipPriorityOptions.length === 0) {
+      setMembershipPriorityGroupModalId(null);
+      return;
+    }
+
+    setMembershipPriorityGroupModalId((currentValue) =>
+      currentValue && membershipPriorityOptions.some((group) => group.id === currentValue)
         ? currentValue
-        : overview.priorityGroups[0].id,
+        : membershipPriorityOptions[0].id,
     );
-  }, [memberRoleDraft, overview]);
+  }, [membershipRoleModalDraft, membershipPriorityOptions]);
 
   async function reloadAccounts() {
     if (!profile?.is_super_admin) {
@@ -363,6 +420,14 @@ export default function HomeScreen() {
     );
   }
 
+  async function reloadMemberships() {
+    if (!profile?.is_super_admin) {
+      return;
+    }
+
+    setAdminMemberships(await listAllAccountMemberships());
+  }
+
   function resetModalityForm() {
     setCreateModalityNameDraft("");
     setCreateModalitySlugDraft("");
@@ -381,6 +446,48 @@ export default function HomeScreen() {
     setCreateOpenHours("48");
     setCreateCloseMinutes("120");
     setCreatePriorityGroups("Prioridade 1, Prioridade 2, Lista geral");
+  }
+
+  async function hydrateMembershipPriorityOptions(
+    accountId: string | null,
+    preferredPriorityGroupId?: string | null,
+  ) {
+    if (!accountId) {
+      setMembershipPriorityOptions([]);
+      setMembershipPriorityGroupModalId(null);
+      return;
+    }
+
+    const accountOverview = await getAccountOverview(accountId);
+    const priorityOptions = accountOverview.priorityGroups.map((group) => ({
+      id: group.id,
+      name: group.name,
+      priority_rank: group.priority_rank,
+    }));
+
+    setMembershipPriorityOptions(priorityOptions);
+
+    if (priorityOptions.length === 0) {
+      setMembershipPriorityGroupModalId(null);
+      return;
+    }
+
+    const nextPriorityGroupId =
+      preferredPriorityGroupId && priorityOptions.some((group) => group.id === preferredPriorityGroupId)
+        ? preferredPriorityGroupId
+        : priorityOptions[0].id;
+
+    setMembershipPriorityGroupModalId(nextPriorityGroupId);
+  }
+
+  function resetMembershipForm() {
+    const firstAccountId = superAdminAccounts[0]?.id ?? null;
+    setMembershipAccountIdDraft(firstAccountId);
+    setMembershipEmailDraft("");
+    setMembershipRoleModalDraft("player");
+    setMembershipProfileIdDraft(null);
+    setMembershipPriorityOptions([]);
+    setMembershipPriorityGroupModalId(null);
   }
 
   function closeAdminModal() {
@@ -426,6 +533,24 @@ export default function HomeScreen() {
     });
   }
 
+  async function openCreateMembershipModal() {
+    resetMembershipForm();
+    setAdminModal({
+      type: "membership",
+      mode: "create",
+    });
+    setIsModalLoading(true);
+
+    try {
+      await hydrateMembershipPriorityOptions(superAdminAccounts[0]?.id ?? null);
+    } catch (loadError) {
+      setMessage({ tone: "error", text: getReadableError(loadError) });
+      setAdminModal(null);
+    } finally {
+      setIsModalLoading(false);
+    }
+  }
+
   async function openEditAccountModal(accountId: string) {
     setAdminModal({
       type: "account",
@@ -448,6 +573,28 @@ export default function HomeScreen() {
       setCreateOpenHours(String(accountOverview.account.confirmation_open_hours_before));
       setCreateCloseMinutes(String(accountOverview.account.confirmation_close_minutes_before));
       setCreatePriorityGroups(accountOverview.priorityGroups.map((group) => group.name).join(", "));
+    } catch (loadError) {
+      setMessage({ tone: "error", text: getReadableError(loadError) });
+      setAdminModal(null);
+    } finally {
+      setIsModalLoading(false);
+    }
+  }
+
+  async function openEditMembershipModal(item: AccountMembershipAdminItem) {
+    setAdminModal({
+      type: "membership",
+      mode: "edit",
+      targetId: item.membership.id,
+    });
+    setIsModalLoading(true);
+
+    try {
+      setMembershipAccountIdDraft(item.account.id);
+      setMembershipEmailDraft(item.profile.email);
+      setMembershipRoleModalDraft(item.membership.role);
+      setMembershipProfileIdDraft(item.profile.id);
+      await hydrateMembershipPriorityOptions(item.account.id, item.priorityGroup?.id ?? null);
     } catch (loadError) {
       setMessage({ tone: "error", text: getReadableError(loadError) });
       setAdminModal(null);
@@ -746,60 +893,116 @@ export default function HomeScreen() {
     );
   }
 
-  async function handleLinkMember() {
-    if (!selectedAccess || !overview) {
+  async function handleSaveMembership() {
+    if (!membershipAccountIdDraft) {
+      setMessage({ tone: "error", text: "Selecione a conta esportiva do vinculo." });
       return;
     }
 
-    const normalizedEmail = memberEmailDraft.trim().toLowerCase();
-
-    if (!normalizedEmail || !normalizedEmail.includes("@")) {
-      setMessage({ tone: "error", text: "Informe um email valido para vinculo." });
+    if (membershipRoleModalDraft === "player" && !membershipPriorityGroupModalId) {
+      setMessage({ tone: "error", text: "Selecione o grupo prioritario do jogador." });
       return;
     }
 
-    if (memberRoleDraft === "player" && !memberPriorityGroupId) {
-      setMessage({
-        tone: "error",
-        text: "Selecione o grupo prioritario do jogador antes de salvar.",
-      });
-      return;
-    }
-
-    setIsLinkingMember(true);
+    setIsSubmittingModal(true);
     setMessage(null);
 
     try {
-      const linkedProfile = await findProfileByEmail(normalizedEmail);
+      const isEditing = adminModal?.type === "membership" && adminModal.mode === "edit";
+      let profileId = membershipProfileIdDraft;
+      let profileLabel = membershipEmailDraft.trim().toLowerCase();
 
-      if (!linkedProfile) {
-        setMessage({
-          tone: "error",
-          text: "Esse email ainda nao tem perfil. O usuario precisa entrar no app uma vez antes do vinculo.",
-        });
+      if (!isEditing) {
+        const normalizedEmail = membershipEmailDraft.trim().toLowerCase();
+
+        if (!normalizedEmail || !normalizedEmail.includes("@")) {
+          setMessage({ tone: "error", text: "Informe um email valido para o vinculo." });
+          return;
+        }
+
+        const linkedProfile = await findProfileByEmail(normalizedEmail);
+
+        if (!linkedProfile) {
+          setMessage({
+            tone: "error",
+            text: "Esse email ainda nao tem perfil. O usuario precisa entrar no app uma vez antes do vinculo.",
+          });
+          return;
+        }
+
+        profileId = linkedProfile.id;
+        profileLabel = linkedProfile.full_name || linkedProfile.email;
+      }
+
+      if (!profileId) {
+        setMessage({ tone: "error", text: "Nao foi possivel identificar o usuario do vinculo." });
         return;
       }
 
       await upsertAccountMembership({
-        accountId: selectedAccess.account.id,
-        profileId: linkedProfile.id,
-        role: memberRoleDraft,
-        priorityGroupId: memberRoleDraft === "player" ? memberPriorityGroupId : null,
+        accountId: membershipAccountIdDraft,
+        profileId,
+        role: membershipRoleModalDraft,
+        priorityGroupId: membershipRoleModalDraft === "player" ? membershipPriorityGroupModalId : null,
       });
 
-      setOverview(await getAccountOverview(selectedAccess.account.id));
+      await reloadMemberships();
       await refresh();
-      setMemberEmailDraft("");
-      setMemberRoleDraft("player");
+
+      if (selectedAccountId === membershipAccountIdDraft) {
+        setOverview(await getAccountOverview(membershipAccountIdDraft));
+      }
+
+      closeAdminModal();
+      resetMembershipForm();
+      setAdminTab("memberships");
       setMessage({
         tone: "success",
-        text: `${linkedProfile.full_name || linkedProfile.email} vinculado a ${selectedAccess.account.name}.`,
+        text: isEditing ? "Vinculo atualizado." : `${profileLabel} vinculado com sucesso.`,
       });
-    } catch (linkError) {
-      setMessage({ tone: "error", text: getReadableError(linkError) });
+    } catch (saveError) {
+      setMessage({ tone: "error", text: getReadableError(saveError) });
     } finally {
-      setIsLinkingMember(false);
+      setIsSubmittingModal(false);
     }
+  }
+
+  async function handleDeactivateMembership(item: AccountMembershipAdminItem) {
+    setDeletingItemId(item.membership.id);
+    setMessage(null);
+
+    try {
+      await deactivateAccountMembership(item.membership.id);
+      await reloadMemberships();
+      await refresh();
+
+      if (selectedAccountId === item.account.id) {
+        setOverview(await getAccountOverview(item.account.id));
+      }
+
+      setMessage({ tone: "success", text: "Vinculo removido da conta esportiva." });
+    } catch (deactivateError) {
+      setMessage({ tone: "error", text: getReadableError(deactivateError) });
+    } finally {
+      setDeletingItemId(null);
+    }
+  }
+
+  function confirmDeactivateMembership(item: AccountMembershipAdminItem) {
+    Alert.alert(
+      "Desvincular usuario",
+      `Deseja remover ${item.profile.full_name || item.profile.email} da conta ${item.account.name}?`,
+      [
+        { text: "Cancelar", style: "cancel" },
+        {
+          text: "Desvincular",
+          style: "destructive",
+          onPress: () => {
+            void handleDeactivateMembership(item);
+          },
+        },
+      ],
+    );
   }
 
   function renderSuperAdminManagement() {
@@ -810,14 +1013,21 @@ export default function HomeScreen() {
             onPress={() => setAdminTab("accounts")}
             style={[styles.tabButton, adminTab === "accounts" && styles.tabButtonActive]}>
             <Text style={[styles.tabText, adminTab === "accounts" && styles.tabTextActive]}>
-              Contas esportivas
+              Contas
             </Text>
           </Pressable>
           <Pressable
             onPress={() => setAdminTab("modalities")}
             style={[styles.tabButton, adminTab === "modalities" && styles.tabButtonActive]}>
             <Text style={[styles.tabText, adminTab === "modalities" && styles.tabTextActive]}>
-              Modalidades esportivas
+              Modalidades
+            </Text>
+          </Pressable>
+          <Pressable
+            onPress={() => setAdminTab("memberships")}
+            style={[styles.tabButton, adminTab === "memberships" && styles.tabButtonActive]}>
+            <Text style={[styles.tabText, adminTab === "memberships" && styles.tabTextActive]}>
+              Usuarios
             </Text>
           </Pressable>
         </View>
@@ -879,7 +1089,7 @@ export default function HomeScreen() {
               <Text style={styles.panelText}>Nenhuma conta esportiva cadastrada ainda.</Text>
             )}
           </View>
-        ) : (
+        ) : adminTab === "modalities" ? (
           <View style={styles.panel}>
             <View style={styles.inlineHeader}>
               <View style={styles.inlineHeaderContent}>
@@ -925,6 +1135,57 @@ export default function HomeScreen() {
               <Text style={styles.panelText}>Nenhuma modalidade esportiva cadastrada ainda.</Text>
             )}
           </View>
+        ) : (
+          <View style={styles.panel}>
+            <View style={styles.inlineHeader}>
+              <View style={styles.inlineHeaderContent}>
+                <Text style={styles.panelTitle}>Usuarios e vinculos</Text>
+                <Text style={styles.panelText}>
+                  Gerencie os usuarios ja cadastrados e seus papeis em cada conta esportiva.
+                </Text>
+              </View>
+              <Pressable onPress={() => void openCreateMembershipModal()} style={styles.secondaryButton}>
+                <Text style={styles.secondaryButtonText}>Novo vinculo</Text>
+              </Pressable>
+            </View>
+
+            {adminMemberships.length > 0 ? (
+              adminMemberships.map((item) => (
+                <View key={item.membership.id} style={styles.listCard}>
+                  <View style={styles.listCardHeader}>
+                    <View style={styles.flex}>
+                      <Text style={styles.panelTitle}>{item.profile.full_name || item.profile.email}</Text>
+                      <Text style={styles.panelText}>{item.profile.email}</Text>
+                      <Text style={styles.panelText}>
+                        {item.account.name} | {roleLabels[item.membership.role]}
+                        {item.priorityGroup ? ` | ${item.priorityGroup.name}` : ""}
+                      </Text>
+                    </View>
+                    <View style={styles.listActions}>
+                      <Pressable
+                        onPress={() => void openEditMembershipModal(item)}
+                        style={styles.inlineActionButton}>
+                        <Text style={styles.inlineActionText}>Editar</Text>
+                      </Pressable>
+                      <Pressable
+                        onPress={() => confirmDeactivateMembership(item)}
+                        disabled={deletingItemId === item.membership.id}
+                        style={[
+                          styles.inlineDangerButton,
+                          deletingItemId === item.membership.id && styles.buttonDisabled,
+                        ]}>
+                        <Text style={styles.inlineDangerText}>
+                          {deletingItemId === item.membership.id ? "Removendo..." : "Desvincular"}
+                        </Text>
+                      </Pressable>
+                    </View>
+                  </View>
+                </View>
+              ))
+            ) : (
+              <Text style={styles.panelText}>Nenhum usuario vinculado a contas esportivas ainda.</Text>
+            )}
+          </View>
         )}
       </View>
     );
@@ -936,14 +1197,19 @@ export default function HomeScreen() {
     }
 
     const isModalityModal = adminModal.type === "modality";
+    const isMembershipModal = adminModal.type === "membership";
     const title =
       adminModal.mode === "create"
         ? isModalityModal
           ? "Nova modalidade esportiva"
-          : "Nova conta esportiva"
+          : isMembershipModal
+            ? "Novo vinculo de usuario"
+            : "Nova conta esportiva"
         : isModalityModal
           ? "Editar modalidade esportiva"
-          : "Editar conta esportiva";
+          : isMembershipModal
+            ? "Editar vinculo de usuario"
+            : "Editar conta esportiva";
 
     return (
       <Modal
@@ -1009,6 +1275,101 @@ export default function HomeScreen() {
                       ) : (
                         <Text style={styles.primaryButtonText}>
                           {adminModal.mode === "create" ? "Criar modalidade" : "Salvar modalidade"}
+                        </Text>
+                      )}
+                    </Pressable>
+                  </>
+                ) : isMembershipModal ? (
+                  <>
+                    <Text style={styles.label}>Conta esportiva</Text>
+                    <View style={styles.chips}>
+                      {superAdminAccounts.map((account) => (
+                        <Pressable
+                          key={account.id}
+                          onPress={() => setMembershipAccountIdDraft(account.id)}
+                          disabled={adminModal.mode === "edit"}
+                          style={[
+                            styles.chip,
+                            membershipAccountIdDraft === account.id && styles.chipSelected,
+                            adminModal.mode === "edit" && styles.buttonDisabled,
+                          ]}>
+                          <Text
+                            style={[
+                              styles.chipText,
+                              membershipAccountIdDraft === account.id && styles.chipTextSelected,
+                            ]}>
+                            {account.name}
+                          </Text>
+                        </Pressable>
+                      ))}
+                    </View>
+
+                    <TextInput
+                      value={membershipEmailDraft}
+                      onChangeText={setMembershipEmailDraft}
+                      placeholder="email@exemplo.com"
+                      placeholderTextColor={Colors.textMuted}
+                      autoCapitalize="none"
+                      editable={adminModal.mode !== "edit"}
+                      keyboardType="email-address"
+                      style={[styles.input, adminModal.mode === "edit" && styles.inputReadOnly]}
+                    />
+
+                    <Text style={styles.label}>Papel na conta</Text>
+                    <View style={styles.chips}>
+                      {(Object.entries(roleLabels) as [AccountRole, string][]).map(([role, label]) => (
+                        <Pressable
+                          key={role}
+                          onPress={() => setMembershipRoleModalDraft(role)}
+                          style={[
+                            styles.chip,
+                            membershipRoleModalDraft === role && styles.chipSelected,
+                          ]}>
+                          <Text
+                            style={[
+                              styles.chipText,
+                              membershipRoleModalDraft === role && styles.chipTextSelected,
+                            ]}>
+                            {label}
+                          </Text>
+                        </Pressable>
+                      ))}
+                    </View>
+
+                    {membershipRoleModalDraft === "player" ? (
+                      <>
+                        <Text style={styles.label}>Grupo prioritario</Text>
+                        <View style={styles.chips}>
+                          {membershipPriorityOptions.map((group) => (
+                            <Pressable
+                              key={group.id}
+                              onPress={() => setMembershipPriorityGroupModalId(group.id)}
+                              style={[
+                                styles.chip,
+                                membershipPriorityGroupModalId === group.id && styles.chipSelected,
+                              ]}>
+                              <Text
+                                style={[
+                                  styles.chipText,
+                                  membershipPriorityGroupModalId === group.id && styles.chipTextSelected,
+                                ]}>
+                                {group.priority_rank}. {group.name}
+                              </Text>
+                            </Pressable>
+                          ))}
+                        </View>
+                      </>
+                    ) : null}
+
+                    <Pressable
+                      onPress={() => void handleSaveMembership()}
+                      disabled={isSubmittingModal}
+                      style={[styles.primaryButton, isSubmittingModal && styles.buttonDisabled]}>
+                      {isSubmittingModal ? (
+                        <ActivityIndicator color="#ffffff" />
+                      ) : (
+                        <Text style={styles.primaryButtonText}>
+                          {adminModal.mode === "create" ? "Criar vinculo" : "Salvar vinculo"}
                         </Text>
                       )}
                     </Pressable>
@@ -1211,7 +1572,7 @@ export default function HomeScreen() {
           </Text>
           <Text style={styles.panelText}>
             {profile?.is_super_admin
-              ? "Use o formulario acima para cadastrar a primeira conta esportiva."
+              ? "Use a aba de contas esportivas para cadastrar a primeira conta."
               : "Depois do cadastro da conta, vincule este usuario em account_memberships."}
           </Text>
         </View>
@@ -1266,82 +1627,6 @@ export default function HomeScreen() {
                   ))}
                 </View>
               </View>
-
-              {profile?.is_super_admin ? (
-                <View style={styles.panel}>
-                  <Text style={styles.panelTitle}>Vincular usuario a esta conta</Text>
-                  <Text style={styles.panelText}>
-                    Use um email que ja tenha entrado no app ao menos uma vez.
-                  </Text>
-
-                  <TextInput
-                    value={memberEmailDraft}
-                    onChangeText={setMemberEmailDraft}
-                    placeholder="email@exemplo.com"
-                    placeholderTextColor={Colors.textMuted}
-                    autoCapitalize="none"
-                    keyboardType="email-address"
-                    style={styles.input}
-                  />
-
-                  <Text style={styles.label}>Papel na conta</Text>
-                  <View style={styles.chips}>
-                    {(Object.entries(roleLabels) as [AccountRole, string][]).map(([role, label]) => (
-                      <Pressable
-                        key={role}
-                        onPress={() => setMemberRoleDraft(role)}
-                        style={[
-                          styles.chip,
-                          memberRoleDraft === role && styles.chipSelected,
-                        ]}>
-                        <Text
-                          style={[
-                            styles.chipText,
-                            memberRoleDraft === role && styles.chipTextSelected,
-                          ]}>
-                          {label}
-                        </Text>
-                      </Pressable>
-                    ))}
-                  </View>
-
-                  {memberRoleDraft === "player" ? (
-                    <>
-                      <Text style={styles.label}>Grupo prioritario</Text>
-                      <View style={styles.chips}>
-                        {overview.priorityGroups.map((group) => (
-                          <Pressable
-                            key={group.id}
-                            onPress={() => setMemberPriorityGroupId(group.id)}
-                            style={[
-                              styles.chip,
-                              memberPriorityGroupId === group.id && styles.chipSelected,
-                            ]}>
-                            <Text
-                              style={[
-                                styles.chipText,
-                                memberPriorityGroupId === group.id && styles.chipTextSelected,
-                              ]}>
-                              {group.name}
-                            </Text>
-                          </Pressable>
-                        ))}
-                      </View>
-                    </>
-                  ) : null}
-
-                  <Pressable
-                    onPress={() => void handleLinkMember()}
-                    disabled={isLinkingMember}
-                    style={[styles.primaryButton, isLinkingMember && styles.buttonDisabled]}>
-                    {isLinkingMember ? (
-                      <ActivityIndicator color="#ffffff" />
-                    ) : (
-                      <Text style={styles.primaryButtonText}>Vincular usuario</Text>
-                    )}
-                  </Pressable>
-                </View>
-              ) : null}
 
               {!isSuperAdmin && canManageAccount ? (
                 <View style={styles.panel}>
@@ -1537,6 +1822,9 @@ const styles = StyleSheet.create({
     fontSize: 15,
     paddingHorizontal: 14,
     paddingVertical: 14,
+  },
+  inputReadOnly: {
+    opacity: 0.65,
   },
   multiline: { minHeight: 84, textAlignVertical: "top" },
   label: { color: Colors.text, fontSize: 13, fontWeight: "800" },
