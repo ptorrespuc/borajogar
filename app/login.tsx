@@ -16,7 +16,7 @@ import Colors from "@/constants/Colors";
 import { useAuth } from "@/src/providers/auth-provider";
 
 export default function LoginScreen() {
-  const { session, signIn, signUp } = useAuth();
+  const { session, signIn, signUp, requestPasswordReset } = useAuth();
   const [mode, setMode] = useState<"sign-in" | "sign-up">("sign-in");
   const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");
@@ -45,6 +45,27 @@ export default function LoginScreen() {
       }
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Nao foi possivel concluir a autenticacao.");
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  async function handleForgotPassword() {
+    const normalizedEmail = email.trim().toLowerCase();
+
+    if (!normalizedEmail || !normalizedEmail.includes("@")) {
+      setMessage("Informe o email da conta para receber o link de redefinicao.");
+      return;
+    }
+
+    setIsSubmitting(true);
+    setMessage(null);
+
+    try {
+      await requestPasswordReset(normalizedEmail);
+      setMessage("Enviamos o email de redefinicao de senha. Abra o link no dispositivo em que o app esta instalado.");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Nao foi possivel enviar o email de redefinicao.");
     } finally {
       setIsSubmitting(false);
     }
@@ -136,6 +157,12 @@ export default function LoginScreen() {
                 </Text>
               )}
             </Pressable>
+
+            {mode === "sign-in" ? (
+              <Pressable disabled={isSubmitting} onPress={() => void handleForgotPassword()}>
+                <Text style={styles.linkText}>Esqueci minha senha</Text>
+              </Pressable>
+            ) : null}
 
             <Text style={styles.footnote}>
               Se o banco ainda nao estiver com a migracao aplicada, o login pode entrar mas o bootstrap do perfil vai
@@ -257,6 +284,12 @@ const styles = StyleSheet.create({
     color: "#ffffff",
     fontSize: 14,
     fontWeight: "800",
+  },
+  linkText: {
+    color: Colors.tint,
+    fontSize: 13,
+    fontWeight: "800",
+    textAlign: "center",
   },
   footnote: {
     color: Colors.textMuted,

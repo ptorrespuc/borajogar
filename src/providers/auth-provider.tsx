@@ -1,4 +1,5 @@
 import type { Session } from "@supabase/supabase-js";
+import * as Linking from "expo-linking";
 import {
   createContext,
   startTransition,
@@ -8,11 +9,14 @@ import {
 } from "react";
 
 import {
+  consumeAuthRedirect,
   getCurrentSession,
   onAuthStateChange,
+  requestPasswordReset,
   signInWithPassword,
   signOut as signOutFromSupabase,
   signUpWithPassword,
+  updatePassword,
 } from "@/src/lib/auth";
 import { loadAppBootstrap, type MembershipSummary } from "@/src/lib/bootstrap";
 import type { Profile } from "@/src/types/domain";
@@ -25,6 +29,8 @@ type AuthContextValue = {
   error: string | null;
   signIn: (email: string, password: string) => Promise<void>;
   signUp: (input: { fullName: string; email: string; password: string }) => Promise<void>;
+  requestPasswordReset: (email: string) => Promise<void>;
+  updatePassword: (password: string) => Promise<void>;
   signOut: () => Promise<void>;
   refresh: () => Promise<void>;
 };
@@ -79,6 +85,39 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     };
   }, []);
 
+  useEffect(() => {
+    let isMounted = true;
+
+    async function handleRedirect(url: string | null) {
+      if (!url) {
+        return;
+      }
+
+      try {
+        await consumeAuthRedirect(url);
+      } catch (nextError) {
+        if (isMounted) {
+          setError(getReadableError(nextError));
+        }
+      }
+    }
+
+    void Linking.getInitialURL().then((url) => {
+      void handleRedirect(url);
+    });
+
+    const subscription = Linking.addEventListener("url", (event) => {
+      startTransition(() => {
+        void handleRedirect(event.url);
+      });
+    });
+
+    return () => {
+      isMounted = false;
+      subscription.remove();
+    };
+  }, []);
+
   const value: AuthContextValue = {
     session,
     profile,
@@ -90,6 +129,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     },
     signUp: async (input) => {
       await signUpWithPassword(input);
+    },
+    requestPasswordReset: async (email) => {
+      await requestPasswordReset(email);
+    },
+    updatePassword: async (password) => {
+      await updatePassword(password);
     },
     signOut: async () => {
       await signOutFromSupabase();

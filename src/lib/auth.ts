@@ -2,6 +2,23 @@ import type { Session } from "@supabase/supabase-js";
 
 import { supabase } from "@/src/lib/supabase";
 
+const appScheme = "futeboldequarta";
+
+function buildNativeRedirectUrl(path: string) {
+  const normalizedPath = path.replace(/^\/+/, "");
+  return `${appScheme}://${normalizedPath}`;
+}
+
+function parseUrlParams(url: string) {
+  const [baseWithQuery, hash = ""] = url.split("#", 2);
+  const query = baseWithQuery.includes("?") ? baseWithQuery.split("?")[1] ?? "" : "";
+  return new URLSearchParams([query, hash].filter(Boolean).join("&"));
+}
+
+function buildAuthRedirectUrl(path: string) {
+  return buildNativeRedirectUrl(path);
+}
+
 export async function getCurrentSession() {
   const {
     data: { session },
@@ -37,6 +54,7 @@ export async function signUpWithPassword(input: {
     email: input.email,
     password: input.password,
     options: {
+      emailRedirectTo: buildAuthRedirectUrl("/login"),
       data: {
         full_name: input.fullName,
         name: input.fullName,
@@ -49,6 +67,61 @@ export async function signUpWithPassword(input: {
   }
 
   return data.session;
+}
+
+export async function requestPasswordReset(email: string) {
+  const { error } = await supabase.auth.resetPasswordForEmail(email, {
+    redirectTo: buildAuthRedirectUrl("/reset-password"),
+  });
+
+  if (error) {
+    throw new Error(error.message);
+  }
+}
+
+export async function updatePassword(password: string) {
+  const { error } = await supabase.auth.updateUser({
+    password,
+  });
+
+  if (error) {
+    throw new Error(error.message);
+  }
+}
+
+export async function consumeAuthRedirect(url: string) {
+  if (!url) {
+    return null;
+  }
+
+  const params = parseUrlParams(url);
+  const errorDescription = params.get("error_description");
+
+  if (errorDescription) {
+    throw new Error(errorDescription);
+  }
+
+  const accessToken = params.get("access_token");
+  const refreshToken = params.get("refresh_token");
+  const type = params.get("type");
+
+  if (!accessToken || !refreshToken) {
+    return null;
+  }
+
+  const { data, error } = await supabase.auth.setSession({
+    access_token: accessToken,
+    refresh_token: refreshToken,
+  });
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return {
+    session: data.session,
+    type,
+  };
 }
 
 export async function signOut() {

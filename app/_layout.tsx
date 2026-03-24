@@ -78,6 +78,12 @@ function RootLayoutNav() {
           <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
           <Stack.Screen name="login" options={{ headerShown: false }} />
           <Stack.Screen
+            name="reset-password"
+            options={{
+              title: "Redefinir senha",
+            }}
+          />
+          <Stack.Screen
             name="modal"
             options={{
               presentation: 'modal',
