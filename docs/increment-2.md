@@ -16,7 +16,7 @@ Objetivo: ativar RLS no Supabase sem quebrar o fluxo atual de autenticacao, perf
 3. Criar ou reutilizar um usuario autenticado.
 4. Confirmar que esse usuario consegue ler `public.profiles` apenas do proprio `auth.uid()`.
 5. Confirmar que, sem membership, `sports_accounts` retorna vazio para esse usuario.
-6. Inserir uma membership ativa para a conta `futebol-de-quarta`.
+6. Inserir uma membership ativa para a conta `borajogar`.
 7. Confirmar que o bootstrap volta a enxergar `sports_accounts`, `account_memberships` e `account_priority_groups`.
 
 ## Resultado esperado

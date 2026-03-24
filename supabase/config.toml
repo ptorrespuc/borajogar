@@ -2,7 +2,7 @@
 # https://supabase.com/docs/guides/local-development/cli/config
 # A string used to distinguish different Supabase projects on the same host. Defaults to the
 # working directory name when running `supabase init`.
-project_id = "futeboldequarta"
+project_id = "borajogar"
 
 [api]
 enabled = true
@@ -151,9 +151,9 @@ max_indexes = 5
 enabled = true
 # The base URL of your website. Used as an allow-list for redirects and for constructing URLs used
 # in emails.
-site_url = "futeboldequarta://login"
+site_url = "borajogar://login"
 # A list of *exact* URLs that auth providers are permitted to redirect to post authentication.
-additional_redirect_urls = ["futeboldequarta://login", "futeboldequarta://reset-password"]
+additional_redirect_urls = ["borajogar://login", "borajogar://reset-password"]
 # How long tokens are valid for, in seconds. Defaults to 3600 (1 hour), maximum 604,800 (1 week).
 jwt_expiry = 3600
 # JWT issuer URL. If not set, defaults to the local API URL (http://127.0.0.1:<port>/auth/v1).
@@ -227,11 +227,11 @@ otp_expiry = 3600
 # sender_name = "Admin"
 
 [auth.email.template.confirmation]
-subject = "Confirme seu cadastro no Futebol de Quarta"
+subject = "Confirme seu cadastro no BoraJogar"
 content_path = "./supabase/templates/confirmation.html"
 
 [auth.email.template.recovery]
-subject = "Redefina sua senha no Futebol de Quarta"
+subject = "Redefina sua senha no BoraJogar"
 content_path = "./supabase/templates/recovery.html"
 
 # Uncomment to customize notification email template

@@ -2,7 +2,7 @@ import type { EmailOtpType, Session } from "@supabase/supabase-js";
 
 import { supabase } from "@/src/lib/supabase";
 
-const appScheme = "futeboldequarta";
+const appScheme = "borajogar";
 
 function buildNativeRedirectUrl(path: string) {
   const normalizedPath = path.replace(/^\/+/, "");

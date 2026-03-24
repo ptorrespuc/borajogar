@@ -42,7 +42,7 @@ const mailtrapUrl = "https://send.api.mailtrap.io/api/send";
 const hookSecret = (Deno.env.get("SEND_EMAIL_HOOK_SECRET") ?? "").replace("v1,whsec_", "");
 const mailtrapToken = Deno.env.get("MAILTRAP_API_TOKEN") ?? "";
 const fromEmail = Deno.env.get("MAILTRAP_FROM_EMAIL") ?? "hello@demomailtrap.co";
-const fromName = Deno.env.get("MAILTRAP_FROM_NAME") ?? "Futebol de Quarta";
+const fromName = Deno.env.get("MAILTRAP_FROM_NAME") ?? "BoraJogar";
 
 function escapeHtml(value: string) {
   return value
@@ -64,7 +64,7 @@ function buildActionUrl(input: {
   fallbackUrl?: string;
 }) {
   const fallbackPath =
-    input.actionType === "recovery" ? "futeboldequarta://reset-password" : "futeboldequarta://login";
+    input.actionType === "recovery" ? "borajogar://reset-password" : "borajogar://login";
   const target = new URL(input.redirectTo || input.fallbackUrl || fallbackPath);
 
   target.searchParams.set("token_hash", input.tokenHash);
@@ -79,7 +79,7 @@ function getActionContent(actionType: EmailActionType, actionUrl: string, recipi
   switch (actionType) {
     case "signup":
       return {
-        subject: "Confirme seu cadastro no Futebol de Quarta",
+        subject: "Confirme seu cadastro no BoraJogar",
         preview: "Seu cadastro esta quase pronto.",
         title: "Confirme seu cadastro",
         body: `${greeting} Toque no botao abaixo para validar seu email e entrar no app.`,
@@ -88,7 +88,7 @@ function getActionContent(actionType: EmailActionType, actionUrl: string, recipi
       };
     case "recovery":
       return {
-        subject: "Redefina sua senha no Futebol de Quarta",
+        subject: "Redefina sua senha no BoraJogar",
         preview: "Recebemos um pedido para redefinir sua senha.",
         title: "Redefinir senha",
         body: `${greeting} Use o link abaixo para autorizar a troca da sua senha no app.`,
@@ -97,7 +97,7 @@ function getActionContent(actionType: EmailActionType, actionUrl: string, recipi
       };
     case "invite":
       return {
-        subject: "Seu acesso ao Futebol de Quarta foi liberado",
+        subject: "Seu acesso ao BoraJogar foi liberado",
         preview: "Voce recebeu um convite para entrar no app.",
         title: "Voce foi convidado",
         body: `${greeting} Abra o link abaixo para aceitar o convite e concluir seu acesso.`,
@@ -107,16 +107,16 @@ function getActionContent(actionType: EmailActionType, actionUrl: string, recipi
     case "magiclink":
     case "email":
       return {
-        subject: "Seu link de acesso do Futebol de Quarta",
+        subject: "Seu link de acesso do BoraJogar",
         preview: "Entre no app com este link seguro.",
         title: "Entrar no app",
-        body: `${greeting} Use o botao abaixo para concluir o acesso ao Futebol de Quarta.`,
+        body: `${greeting} Use o botao abaixo para concluir o acesso ao BoraJogar.`,
         ctaLabel: "Entrar agora",
         actionUrl,
       };
     case "email_change":
       return {
-        subject: "Confirme a alteracao de email no Futebol de Quarta",
+        subject: "Confirme a alteracao de email no BoraJogar",
         preview: "Estamos validando a troca de email da sua conta.",
         title: "Confirmar alteracao de email",
         body: `${greeting} Toque no botao abaixo para confirmar a alteracao de email da sua conta.`,
@@ -154,7 +154,7 @@ function renderEmailHtml(input: {
           <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:560px;border-collapse:collapse;background:#173f2a;border-radius:28px;overflow:hidden;">
             <tr>
               <td style="padding:32px 32px 20px;color:#eff47a;font-size:13px;font-weight:800;letter-spacing:0.18em;text-transform:uppercase;">
-                Futebol de Quarta
+                BoraJogar
               </td>
             </tr>
             <tr>

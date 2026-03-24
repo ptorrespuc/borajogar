@@ -1,11 +1,11 @@
 {
   "expo": {
-    "name": "Futebol de Quarta",
-    "slug": "futeboldequarta",
+    "name": "BoraJogar",
+    "slug": "borajogar",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "futeboldequarta",
+    "scheme": "borajogar",
     "owner": "sgu_puc-rio",
     "userInterfaceStyle": "light",
     "newArchEnabled": true,
@@ -18,11 +18,11 @@
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false
       },
-      "bundleIdentifier": "br.pucrio.futeboldequarta",
+      "bundleIdentifier": "br.pucrio.borajogar",
       "supportsTablet": true
     },
     "android": {
-      "package": "br.pucrio.futeboldequarta",
+      "package": "br.pucrio.borajogar",
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
         "backgroundColor": "#ffffff"

@@ -1,6 +1,6 @@
 # Modelo de Dados Inicial
 
-Este documento traduz a especificacao funcional atual do `futeboldequarta` em um modelo relacional inicial para Supabase/Postgres.
+Este documento traduz a especificacao funcional atual do `BoraJogar` em um modelo relacional inicial para Supabase/Postgres.
 
 ## Decisoes de modelagem
 

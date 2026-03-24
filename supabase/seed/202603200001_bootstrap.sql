@@ -80,8 +80,8 @@ insert into public.sports_accounts (
   auto_notify_event_updates
 )
 select
-  'Futebol de Quarta',
-  'futebol-de-quarta',
+  'BoraJogar',
+  'borajogar',
   modality.id,
   'America/Sao_Paulo',
   20,
@@ -108,7 +108,7 @@ set
 insert into public.account_schedules (account_id, weekday, starts_at, ends_at, is_active)
 select account.id, 3, '20:30:00', '22:00:00', true
 from public.sports_accounts as account
-where account.slug = 'futebol-de-quarta'
+where account.slug = 'borajogar'
 on conflict (account_id, weekday, starts_at) do update
 set
   ends_at = excluded.ends_at,
@@ -124,7 +124,7 @@ cross join (
     ('Prioridade 2', 2, '#5a9b3c'),
     ('Lista geral', 3, '#88938c')
 ) as grp(name, priority_rank, color_hex)
-where account.slug = 'futebol-de-quarta'
+where account.slug = 'borajogar'
 on conflict (account_id, priority_rank) do update
 set
   name = excluded.name,
@@ -139,7 +139,7 @@ cross join (
     ('Melhor jogador', 'Escolha livre entre os participantes ativos do evento.', 'event_participant', 1),
     ('Gol mais bonito', 'Opcoes fechadas com descricao do lance e jogador associado.', 'predefined_options', 2)
 ) as poll(title, description, selection_mode, sort_order)
-where account.slug = 'futebol-de-quarta'
+where account.slug = 'borajogar'
 and not exists (
   select 1
   from public.poll_templates existing
@@ -157,7 +157,7 @@ cross join (
     ('Cartoes amarelos', 'cartoes-amarelos', 3),
     ('Cartoes vermelhos', 'cartoes-vermelhos', 4)
 ) as stat(name, code, sort_order)
-where account.slug = 'futebol-de-quarta'
+where account.slug = 'borajogar'
 on conflict (account_id, code) do update
 set
   name = excluded.name,
