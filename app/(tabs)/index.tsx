@@ -198,6 +198,25 @@ function formatSchedule(weekday: number, startsAt: string, endsAt: string) {
   return `${weekdayLabels[weekday] ?? "Dia"} | ${startsAt.slice(0, 5)} as ${endsAt.slice(0, 5)}`;
 }
 
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, context: string) {
+  let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
+
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((_, reject) => {
+        timeoutHandle = setTimeout(() => {
+          reject(new Error(`${context} demorou mais do que o esperado.`));
+        }, timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timeoutHandle) {
+      clearTimeout(timeoutHandle);
+    }
+  }
+}
+
 export default function HomeScreen() {
   const { profile, memberships, error, signOut, refresh } = useAuth();
   const isSuperAdmin = Boolean(profile?.is_super_admin);
@@ -399,7 +418,11 @@ export default function HomeScreen() {
       setOverviewError(null);
 
       try {
-        const nextOverview = await getAccountOverview(selectedAccessAccountId);
+        const nextOverview = await withTimeout(
+          getAccountOverview(selectedAccessAccountId),
+          8000,
+          "O carregamento da conta",
+        );
 
         if (!isActive) {
           return;
@@ -459,11 +482,15 @@ export default function HomeScreen() {
       setIsWorkspaceLoading(true);
 
       try {
-        const [nextPlayers, nextPollTemplates, nextPositions] = await Promise.all([
-          listAccountPlayers(selectedAccessAccountId, selectedOverviewModalityId),
-          listAccountPollTemplates(selectedAccessAccountId),
-          listModalityPositions(selectedOverviewModalityId),
-        ]);
+        const [nextPlayers, nextPollTemplates, nextPositions] = await withTimeout(
+          Promise.all([
+            listAccountPlayers(selectedAccessAccountId, selectedOverviewModalityId),
+            listAccountPollTemplates(selectedAccessAccountId),
+            listModalityPositions(selectedOverviewModalityId),
+          ]),
+          8000,
+          "O carregamento da gestao da conta",
+        );
 
         if (!isActive) {
           return;
