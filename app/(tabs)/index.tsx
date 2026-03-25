@@ -24,8 +24,10 @@ import {
   type AccountPlayerAdminItem,
   addPlayerToWeeklyEvent,
   closeWeeklyEventList,
+  completeEventMatch,
   completeWeeklyEvent,
   createAccountPlayer,
+  createEventMatch,
   createEventPollsFromTemplates,
   createSportModality,
   createSportsAccount,
@@ -40,6 +42,7 @@ import {
   listAllAccountMemberships,
   listAccountPlayers,
   listAccountPollTemplates,
+  listEventMatches,
   listEventPolls,
   listEventPollResults,
   getAccountOverview,
@@ -50,12 +53,14 @@ import {
   removePlayerFromWeeklyEvent,
   updateSportModality,
   updateAccountPlayer,
+  updateEventMatch,
   updatePollTemplate,
   updateSportsAccount,
   upsertAccountPlayerFromAccess,
   upsertAccountMembership,
   updateSportsAccountBasics,
   type AccountOverview,
+  type EventMatchItem,
   type EventPollResultSummary,
   type WeeklyEventParticipantItem,
 } from "@/src/lib/accounts";
@@ -355,6 +360,7 @@ export default function HomeScreen() {
   const [weeklyParticipants, setWeeklyParticipants] = useState<WeeklyEventParticipantItem[]>([]);
   const [weeklyEventPolls, setWeeklyEventPolls] = useState<EventPoll[]>([]);
   const [weeklyPollResults, setWeeklyPollResults] = useState<EventPollResultSummary[]>([]);
+  const [eventMatches, setEventMatches] = useState<EventMatchItem[]>([]);
   const [weeklyPriorityFilter, setWeeklyPriorityFilter] = useState<string>("all");
   const [weeklyActionId, setWeeklyActionId] = useState<string | null>(null);
   const [isWorkspaceLoading, setIsWorkspaceLoading] = useState(false);
@@ -419,6 +425,16 @@ export default function HomeScreen() {
   const [pollDescriptionDraft, setPollDescriptionDraft] = useState("");
   const [pollSelectionModeDraft, setPollSelectionModeDraft] =
     useState<PollSelectionMode>("event_participant");
+  const [matchModal, setMatchModal] = useState<null | { mode: "create" | "edit"; targetId?: string }>(null);
+  const [isMatchModalLoading, setIsMatchModalLoading] = useState(false);
+  const [isSubmittingMatch, setIsSubmittingMatch] = useState(false);
+  const [matchTitleDraft, setMatchTitleDraft] = useState("");
+  const [matchHomeTeamNameDraft, setMatchHomeTeamNameDraft] = useState("Time A");
+  const [matchAwayTeamNameDraft, setMatchAwayTeamNameDraft] = useState("Time B");
+  const [matchHomeScoreDraft, setMatchHomeScoreDraft] = useState("0");
+  const [matchAwayScoreDraft, setMatchAwayScoreDraft] = useState("0");
+  const [matchHomePlayerIds, setMatchHomePlayerIds] = useState<string[]>([]);
+  const [matchAwayPlayerIds, setMatchAwayPlayerIds] = useState<string[]>([]);
 
   useEffect(() => {
     if (!isSuperAdmin) {
@@ -615,6 +631,7 @@ export default function HomeScreen() {
         setWeeklyParticipants([]);
         setWeeklyEventPolls([]);
         setWeeklyPollResults([]);
+        setEventMatches([]);
         setIsWorkspaceLoading(false);
         return;
       }
@@ -650,6 +667,7 @@ export default function HomeScreen() {
         setWeeklyParticipants(nextWeeklyData.nextWeeklyParticipants);
         setWeeklyEventPolls(nextWeeklyData.nextWeeklyEventPolls);
         setWeeklyPollResults(nextWeeklyData.nextWeeklyPollResults);
+        setEventMatches(nextWeeklyData.nextEventMatches);
       } catch (loadError) {
         if (isActive) {
           setMessage({ tone: "error", text: getReadableError(loadError) });
@@ -759,13 +777,15 @@ export default function HomeScreen() {
         nextWeeklyParticipants: [] as WeeklyEventParticipantItem[],
         nextWeeklyEventPolls: [] as EventPoll[],
         nextWeeklyPollResults: [] as EventPollResultSummary[],
+        nextEventMatches: [] as EventMatchItem[],
       };
     }
 
-    const [nextWeeklyParticipants, nextWeeklyEventPolls, nextWeeklyPollResults] = await Promise.all([
+    const [nextWeeklyParticipants, nextWeeklyEventPolls, nextWeeklyPollResults, nextEventMatches] = await Promise.all([
       listWeeklyEventParticipants(nextWeeklyEvent.id, modalityId),
       listEventPolls(nextWeeklyEvent.id),
       listEventPollResults(nextWeeklyEvent.id),
+      listEventMatches(nextWeeklyEvent.id),
     ]);
 
     return {
@@ -773,6 +793,7 @@ export default function HomeScreen() {
       nextWeeklyParticipants,
       nextWeeklyEventPolls,
       nextWeeklyPollResults,
+      nextEventMatches,
     };
   }
 
@@ -821,6 +842,7 @@ export default function HomeScreen() {
       setWeeklyParticipants([]);
       setWeeklyEventPolls([]);
       setWeeklyPollResults([]);
+      setEventMatches([]);
       return;
     }
 
@@ -848,6 +870,7 @@ export default function HomeScreen() {
     setWeeklyParticipants(nextWeeklyData.nextWeeklyParticipants);
     setWeeklyEventPolls(nextWeeklyData.nextWeeklyEventPolls);
     setWeeklyPollResults(nextWeeklyData.nextWeeklyPollResults);
+    setEventMatches(nextWeeklyData.nextEventMatches);
   }
 
   function resetModalityForm() {
@@ -2244,6 +2267,180 @@ export default function HomeScreen() {
     );
   }
 
+  function resetMatchForm() {
+    setMatchTitleDraft("");
+    setMatchHomeTeamNameDraft("Time A");
+    setMatchAwayTeamNameDraft("Time B");
+    setMatchHomeScoreDraft("0");
+    setMatchAwayScoreDraft("0");
+    setMatchHomePlayerIds([]);
+    setMatchAwayPlayerIds([]);
+  }
+
+  function openCreateMatchModal() {
+    resetMatchForm();
+    setMatchTitleDraft(`Partida ${eventMatches.length + 1}`);
+    setMatchModal({ mode: "create" });
+  }
+
+  function openEditMatchModal(matchItem: EventMatchItem) {
+    setIsMatchModalLoading(true);
+    setMatchModal({ mode: "edit", targetId: matchItem.match.id });
+    setMatchTitleDraft(matchItem.match.title);
+    setMatchHomeTeamNameDraft(matchItem.homeTeam?.team.name ?? "Time A");
+    setMatchAwayTeamNameDraft(matchItem.awayTeam?.team.name ?? "Time B");
+    setMatchHomeScoreDraft(String(matchItem.homeTeam?.team.score ?? 0));
+    setMatchAwayScoreDraft(String(matchItem.awayTeam?.team.score ?? 0));
+    setMatchHomePlayerIds(matchItem.homeTeam?.players.map((player) => player.id) ?? []);
+    setMatchAwayPlayerIds(matchItem.awayTeam?.players.map((player) => player.id) ?? []);
+    setIsMatchModalLoading(false);
+  }
+
+  function closeMatchModal() {
+    setMatchModal(null);
+    setIsMatchModalLoading(false);
+    setIsSubmittingMatch(false);
+    resetMatchForm();
+  }
+
+  function toggleMatchPlayer(side: "home" | "away", playerId: string) {
+    if (side === "home") {
+      if (matchHomePlayerIds.includes(playerId)) {
+        setMatchHomePlayerIds(matchHomePlayerIds.filter((id) => id !== playerId));
+        return;
+      }
+
+      setMatchHomePlayerIds([...matchHomePlayerIds, playerId]);
+      setMatchAwayPlayerIds(matchAwayPlayerIds.filter((id) => id !== playerId));
+      return;
+    }
+
+    if (matchAwayPlayerIds.includes(playerId)) {
+      setMatchAwayPlayerIds(matchAwayPlayerIds.filter((id) => id !== playerId));
+      return;
+    }
+
+    setMatchAwayPlayerIds([...matchAwayPlayerIds, playerId]);
+    setMatchHomePlayerIds(matchHomePlayerIds.filter((id) => id !== playerId));
+  }
+
+  function copyExistingTeamToMatchDraft(side: "home" | "away", sourceTeamId: string) {
+    const sourceTeam = eventMatches
+      .flatMap((matchItem) => [matchItem.homeTeam, matchItem.awayTeam])
+      .find((team) => team?.team.id === sourceTeamId);
+
+    if (!sourceTeam) {
+      return;
+    }
+
+    const sourceIds = sourceTeam.players.map((player) => player.id);
+
+    if (side === "home") {
+      setMatchHomeTeamNameDraft(sourceTeam.team.name);
+      setMatchHomePlayerIds(sourceIds);
+      setMatchAwayPlayerIds(matchAwayPlayerIds.filter((id) => !sourceIds.includes(id)));
+      return;
+    }
+
+    setMatchAwayTeamNameDraft(sourceTeam.team.name);
+    setMatchAwayPlayerIds(sourceIds);
+    setMatchHomePlayerIds(matchHomePlayerIds.filter((id) => !sourceIds.includes(id)));
+  }
+
+  async function handleSaveMatch() {
+    if (!weeklyEvent || !canManageWeeklyPolls) {
+      return;
+    }
+
+    const homeScore = Number(matchHomeScoreDraft);
+    const awayScore = Number(matchAwayScoreDraft);
+
+    if (!matchTitleDraft.trim()) {
+      setMessage({ tone: "error", text: "Informe um titulo para a partida." });
+      return;
+    }
+
+    if (!Number.isInteger(homeScore) || homeScore < 0 || !Number.isInteger(awayScore) || awayScore < 0) {
+      setMessage({ tone: "error", text: "Informe placares validos para os dois times." });
+      return;
+    }
+
+    setIsSubmittingMatch(true);
+    setMessage(null);
+
+    try {
+      if (matchModal?.mode === "edit" && matchModal.targetId) {
+        const currentMatch = eventMatches.find((item) => item.match.id === matchModal.targetId);
+
+        if (!currentMatch?.homeTeam || !currentMatch.awayTeam) {
+          throw new Error("Nao foi possivel localizar os times dessa partida.");
+        }
+
+        await updateEventMatch({
+          matchId: currentMatch.match.id,
+          title: matchTitleDraft.trim(),
+          homeTeamId: currentMatch.homeTeam.team.id,
+          awayTeamId: currentMatch.awayTeam.team.id,
+          homeTeamName: matchHomeTeamNameDraft.trim() || "Time A",
+          awayTeamName: matchAwayTeamNameDraft.trim() || "Time B",
+          homeScore,
+          awayScore,
+          homePlayerIds: matchHomePlayerIds,
+          awayPlayerIds: matchAwayPlayerIds,
+        });
+      } else if (profile) {
+        await createEventMatch({
+          eventId: weeklyEvent.id,
+          title: matchTitleDraft.trim(),
+          createdBy: profile.id,
+          homeTeamName: matchHomeTeamNameDraft.trim() || "Time A",
+          awayTeamName: matchAwayTeamNameDraft.trim() || "Time B",
+          homePlayerIds: matchHomePlayerIds,
+          awayPlayerIds: matchAwayPlayerIds,
+        });
+      }
+
+      await reloadSelectedWorkspace();
+      closeMatchModal();
+      setMessage({ tone: "success", text: "Partida salva no evento." });
+    } catch (saveError) {
+      setMessage({ tone: "error", text: getReadableError(saveError) });
+    } finally {
+      setIsSubmittingMatch(false);
+    }
+  }
+
+  async function handleCompleteMatch(matchItem: EventMatchItem) {
+    setWeeklyActionId(`match-${matchItem.match.id}`);
+    setMessage(null);
+
+    try {
+      await completeEventMatch(matchItem.match.id);
+      await reloadSelectedWorkspace();
+      setMessage({ tone: "success", text: `${matchItem.match.title} foi encerrada.` });
+    } catch (completeError) {
+      setMessage({ tone: "error", text: getReadableError(completeError) });
+    } finally {
+      setWeeklyActionId(null);
+    }
+  }
+
+  function confirmCompleteMatch(matchItem: EventMatchItem) {
+    Alert.alert(
+      "Encerrar partida",
+      "Depois de encerrar a partida, o placar fica registrado para consulta e para montar a proxima.",
+      [
+        { text: "Cancelar", style: "cancel" },
+        {
+          text: "Encerrar partida",
+          onPress: () => {
+            void handleCompleteMatch(matchItem);
+          },
+        },
+      ],
+    );
+  }
+
   async function handleDeactivateMembership(item: AccountMembershipAdminItem) {
     setDeletingItemId(item.membership.id);
     setMessage(null);
@@ -3372,6 +3569,122 @@ export default function HomeScreen() {
     );
   }
 
+  function renderEventMatchesSection() {
+    if (!weeklyEvent || weeklyEvent.status === "draft") {
+      return null;
+    }
+
+    return (
+      <View style={styles.panel}>
+        <View style={styles.inlineHeader}>
+          <View style={styles.inlineHeaderContent}>
+            <Text style={styles.panelTitle}>Partidas do evento</Text>
+            <Text style={styles.panelText}>
+              Monte os dois times, registre o placar e reaproveite a escalação das partidas anteriores.
+            </Text>
+          </View>
+          {weeklyEvent.status === "published" && canManageWeeklyPolls ? (
+            <Pressable onPress={openCreateMatchModal} style={styles.secondaryButton}>
+              <Text style={styles.secondaryButtonText}>Nova partida</Text>
+            </Pressable>
+          ) : null}
+        </View>
+
+        {eventMatches.length > 0 ? (
+          eventMatches.map((matchItem) => {
+            const homeScore = matchItem.homeTeam?.team.score ?? 0;
+            const awayScore = matchItem.awayTeam?.team.score ?? 0;
+            const resultLabel =
+              homeScore === awayScore
+                ? "Empate"
+                : homeScore > awayScore
+                  ? `${matchItem.homeTeam?.team.name ?? "Time A"} venceu`
+                  : `${matchItem.awayTeam?.team.name ?? "Time B"} venceu`;
+
+            return (
+              <View key={matchItem.match.id} style={styles.matchCard}>
+                <View style={styles.inlineHeader}>
+                  <View style={styles.inlineHeaderContent}>
+                    <Text style={styles.workspaceTitle}>{matchItem.match.title}</Text>
+                    <Text style={styles.panelText}>
+                      {matchItem.match.status === "completed" ? "Partida encerrada" : "Partida em andamento"} | {resultLabel}
+                    </Text>
+                  </View>
+                  {weeklyEvent.status === "published" && canManageWeeklyPolls ? (
+                    <View style={styles.listActions}>
+                      <Pressable onPress={() => openEditMatchModal(matchItem)} style={styles.inlineActionButton}>
+                        <Text style={styles.inlineActionText}>Editar</Text>
+                      </Pressable>
+                      {matchItem.match.status !== "completed" ? (
+                        <Pressable
+                          onPress={() => confirmCompleteMatch(matchItem)}
+                          disabled={weeklyActionId === `match-${matchItem.match.id}`}
+                          style={[
+                            styles.inlineDangerButton,
+                            weeklyActionId === `match-${matchItem.match.id}` && styles.buttonDisabled,
+                          ]}>
+                          <Text style={styles.inlineDangerText}>
+                            {weeklyActionId === `match-${matchItem.match.id}` ? "Encerrando..." : "Encerrar partida"}
+                          </Text>
+                        </Pressable>
+                      ) : null}
+                    </View>
+                  ) : null}
+                </View>
+
+                <View style={styles.matchScoreRow}>
+                  <View style={styles.matchScoreTeam}>
+                    <Text style={styles.matchScoreTeamName}>{matchItem.homeTeam?.team.name ?? "Time A"}</Text>
+                    <Text style={styles.matchScoreValue}>{homeScore}</Text>
+                  </View>
+                  <Text style={styles.matchScoreDivider}>x</Text>
+                  <View style={styles.matchScoreTeam}>
+                    <Text style={styles.matchScoreTeamName}>{matchItem.awayTeam?.team.name ?? "Time B"}</Text>
+                    <Text style={styles.matchScoreValue}>{awayScore}</Text>
+                  </View>
+                </View>
+
+                <View style={styles.weeklyBoard}>
+                  <View style={styles.weeklyColumn}>
+                    <Text style={styles.selectionCardTitle}>{matchItem.homeTeam?.team.name ?? "Time A"}</Text>
+                    {(matchItem.homeTeam?.players ?? []).length > 0 ? (
+                      (matchItem.homeTeam?.players ?? []).map((player) => (
+                        <View key={`${matchItem.match.id}-home-${player.id}`} style={styles.matchPlayerRow}>
+                          <PlayerAvatar name={player.full_name} photoUrl={player.photo_url} size={32} />
+                          <Text style={styles.selectionCardText}>{player.full_name}</Text>
+                        </View>
+                      ))
+                    ) : (
+                      <Text style={styles.panelText}>Sem jogadores escalados.</Text>
+                    )}
+                  </View>
+
+                  <View style={styles.weeklyColumn}>
+                    <Text style={styles.selectionCardTitle}>{matchItem.awayTeam?.team.name ?? "Time B"}</Text>
+                    {(matchItem.awayTeam?.players ?? []).length > 0 ? (
+                      (matchItem.awayTeam?.players ?? []).map((player) => (
+                        <View key={`${matchItem.match.id}-away-${player.id}`} style={styles.matchPlayerRow}>
+                          <PlayerAvatar name={player.full_name} photoUrl={player.photo_url} size={32} />
+                          <Text style={styles.selectionCardText}>{player.full_name}</Text>
+                        </View>
+                      ))
+                    ) : (
+                      <Text style={styles.panelText}>Sem jogadores escalados.</Text>
+                    )}
+                  </View>
+                </View>
+              </View>
+            );
+          })
+        ) : (
+          <Text style={styles.panelText}>
+            Nenhuma partida registrada ainda para este evento.
+          </Text>
+        )}
+      </View>
+    );
+  }
+
   function renderWeeklyWorkspace() {
     const weeklyStates = [
       "Evento nao criado",
@@ -3694,10 +4007,214 @@ export default function HomeScreen() {
               </View>
             )}
 
+            {renderEventMatchesSection()}
             {renderWeeklyPollResults()}
           </>
         )}
       </>
+    );
+  }
+
+  function renderMatchModal() {
+    if (!matchModal) {
+      return null;
+    }
+
+    const currentMatch =
+      matchModal.mode === "edit" && matchModal.targetId
+        ? eventMatches.find((item) => item.match.id === matchModal.targetId) ?? null
+        : null;
+    const sourceTeams = eventMatches
+      .filter((item) => item.match.id !== currentMatch?.match.id)
+      .flatMap((item) => [
+        item.homeTeam
+          ? {
+              id: item.homeTeam.team.id,
+              label: `${item.match.title} | ${item.homeTeam.team.name}`,
+            }
+          : null,
+        item.awayTeam
+          ? {
+              id: item.awayTeam.team.id,
+              label: `${item.match.title} | ${item.awayTeam.team.name}`,
+            }
+          : null,
+      ])
+      .filter((item): item is { id: string; label: string } => item !== null);
+
+    return (
+      <Modal animationType="fade" visible transparent onRequestClose={closeMatchModal}>
+        <View style={styles.modalBackdrop}>
+          <View style={styles.modalCard}>
+            <View style={styles.inlineHeader}>
+              <Text style={styles.modalTitle}>
+                {matchModal.mode === "create" ? "Nova partida" : "Editar partida"}
+              </Text>
+              <Pressable onPress={closeMatchModal} style={styles.secondaryButton}>
+                <Text style={styles.secondaryButtonText}>Fechar</Text>
+              </Pressable>
+            </View>
+
+            {isMatchModalLoading ? (
+              <View style={styles.modalLoading}>
+                <ActivityIndicator color={Colors.tint} />
+                <Text style={styles.panelText}>Carregando partida...</Text>
+              </View>
+            ) : (
+              <ScrollView contentContainerStyle={styles.modalContent}>
+                <View style={styles.formSection}>
+                  <Text style={styles.formSectionTitle}>Dados da partida</Text>
+
+                  <View style={styles.fieldBlock}>
+                    <Text style={styles.label}>Titulo da partida</Text>
+                    <TextInput
+                      value={matchTitleDraft}
+                      onChangeText={setMatchTitleDraft}
+                      placeholder="Partida 1"
+                      placeholderTextColor={Colors.textMuted}
+                      style={styles.input}
+                    />
+                  </View>
+
+                  <View style={styles.row}>
+                    <View style={[styles.fieldBlock, styles.flex]}>
+                      <Text style={styles.label}>Placar do time A</Text>
+                      <TextInput
+                        value={matchHomeScoreDraft}
+                        onChangeText={setMatchHomeScoreDraft}
+                        keyboardType="number-pad"
+                        placeholder="0"
+                        placeholderTextColor={Colors.textMuted}
+                        style={styles.input}
+                      />
+                    </View>
+                    <View style={[styles.fieldBlock, styles.flex]}>
+                      <Text style={styles.label}>Placar do time B</Text>
+                      <TextInput
+                        value={matchAwayScoreDraft}
+                        onChangeText={setMatchAwayScoreDraft}
+                        keyboardType="number-pad"
+                        placeholder="0"
+                        placeholderTextColor={Colors.textMuted}
+                        style={styles.input}
+                      />
+                    </View>
+                  </View>
+                </View>
+
+                <View style={styles.formSection}>
+                  <Text style={styles.formSectionTitle}>Time A</Text>
+
+                  <View style={styles.fieldBlock}>
+                    <Text style={styles.label}>Nome do time</Text>
+                    <TextInput
+                      value={matchHomeTeamNameDraft}
+                      onChangeText={setMatchHomeTeamNameDraft}
+                      placeholder="Time A"
+                      placeholderTextColor={Colors.textMuted}
+                      style={styles.input}
+                    />
+                  </View>
+
+                  {sourceTeams.length > 0 ? (
+                    <View style={styles.fieldBlock}>
+                      <Text style={styles.label}>Copiar escalação de outra partida</Text>
+                      <View style={styles.chips}>
+                        {sourceTeams.map((team) => (
+                          <Pressable
+                            key={`home-copy-${team.id}`}
+                            onPress={() => copyExistingTeamToMatchDraft("home", team.id)}
+                            style={styles.chip}>
+                            <Text style={styles.chipText}>{team.label}</Text>
+                          </Pressable>
+                        ))}
+                      </View>
+                    </View>
+                  ) : null}
+
+                  <View style={styles.chips}>
+                    {activeWeeklyParticipants.map((item) => {
+                      const isSelected = matchHomePlayerIds.includes(item.player.id);
+
+                      return (
+                        <Pressable
+                          key={`home-player-${item.player.id}`}
+                          onPress={() => toggleMatchPlayer("home", item.player.id)}
+                          style={[styles.chip, isSelected && styles.chipSelected]}>
+                          <Text style={[styles.chipText, isSelected && styles.chipTextSelected]}>
+                            {item.player.full_name}
+                          </Text>
+                        </Pressable>
+                      );
+                    })}
+                  </View>
+                </View>
+
+                <View style={styles.formSection}>
+                  <Text style={styles.formSectionTitle}>Time B</Text>
+
+                  <View style={styles.fieldBlock}>
+                    <Text style={styles.label}>Nome do time</Text>
+                    <TextInput
+                      value={matchAwayTeamNameDraft}
+                      onChangeText={setMatchAwayTeamNameDraft}
+                      placeholder="Time B"
+                      placeholderTextColor={Colors.textMuted}
+                      style={styles.input}
+                    />
+                  </View>
+
+                  {sourceTeams.length > 0 ? (
+                    <View style={styles.fieldBlock}>
+                      <Text style={styles.label}>Copiar escalação de outra partida</Text>
+                      <View style={styles.chips}>
+                        {sourceTeams.map((team) => (
+                          <Pressable
+                            key={`away-copy-${team.id}`}
+                            onPress={() => copyExistingTeamToMatchDraft("away", team.id)}
+                            style={styles.chip}>
+                            <Text style={styles.chipText}>{team.label}</Text>
+                          </Pressable>
+                        ))}
+                      </View>
+                    </View>
+                  ) : null}
+
+                  <View style={styles.chips}>
+                    {activeWeeklyParticipants.map((item) => {
+                      const isSelected = matchAwayPlayerIds.includes(item.player.id);
+
+                      return (
+                        <Pressable
+                          key={`away-player-${item.player.id}`}
+                          onPress={() => toggleMatchPlayer("away", item.player.id)}
+                          style={[styles.chip, isSelected && styles.chipSelected]}>
+                          <Text style={[styles.chipText, isSelected && styles.chipTextSelected]}>
+                            {item.player.full_name}
+                          </Text>
+                        </Pressable>
+                      );
+                    })}
+                  </View>
+                </View>
+
+                <Pressable
+                  onPress={() => void handleSaveMatch()}
+                  disabled={isSubmittingMatch}
+                  style={[styles.primaryButton, isSubmittingMatch && styles.buttonDisabled]}>
+                  {isSubmittingMatch ? (
+                    <ActivityIndicator color="#ffffff" />
+                  ) : (
+                    <Text style={styles.primaryButtonText}>
+                      {matchModal.mode === "create" ? "Criar partida" : "Salvar partida"}
+                    </Text>
+                  )}
+                </Pressable>
+              </ScrollView>
+            )}
+          </View>
+        </View>
+      </Modal>
     );
   }
 
@@ -4082,6 +4599,7 @@ export default function HomeScreen() {
         ) : null}
       </ScrollView>
       {renderAdminModal()}
+      {renderMatchModal()}
     </>
   );
 }
@@ -4269,6 +4787,46 @@ const styles = StyleSheet.create({
     color: Colors.text,
     fontSize: 18,
     fontWeight: "900",
+  },
+  matchCard: {
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    backgroundColor: Colors.background,
+    padding: 14,
+    gap: 12,
+  },
+  matchScoreRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 10,
+  },
+  matchScoreTeam: {
+    flex: 1,
+    alignItems: "center",
+    gap: 6,
+  },
+  matchScoreTeamName: {
+    color: Colors.text,
+    fontSize: 14,
+    fontWeight: "800",
+    textAlign: "center",
+  },
+  matchScoreValue: {
+    color: Colors.tint,
+    fontSize: 28,
+    fontWeight: "900",
+  },
+  matchScoreDivider: {
+    color: Colors.textMuted,
+    fontSize: 18,
+    fontWeight: "900",
+  },
+  matchPlayerRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
   },
   inlineActionButton: {
     borderRadius: 999,

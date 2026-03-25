@@ -7,6 +7,9 @@ import type {
   AccountPriorityGroup,
   AccountSchedule,
   Event,
+  EventMatch,
+  EventMatchTeam,
+  EventMatchTeamPlayer,
   EventParticipant,
   EventPoll,
   EventPollOption,
@@ -80,6 +83,40 @@ export type EventPollResultSummary = {
   poll: EventPoll;
   totalVotes: number;
   entries: EventPollResultEntry[];
+};
+
+export type EventMatchTeamLineup = {
+  team: EventMatchTeam;
+  players: AccountPlayer[];
+};
+
+export type EventMatchItem = {
+  match: EventMatch;
+  homeTeam: EventMatchTeamLineup | null;
+  awayTeam: EventMatchTeamLineup | null;
+};
+
+export type CreateEventMatchInput = {
+  eventId: string;
+  title: string;
+  createdBy: string;
+  homeTeamName: string;
+  awayTeamName: string;
+  homePlayerIds: string[];
+  awayPlayerIds: string[];
+};
+
+export type UpdateEventMatchInput = {
+  matchId: string;
+  title: string;
+  homeTeamId: string;
+  awayTeamId: string;
+  homeTeamName: string;
+  awayTeamName: string;
+  homeScore: number;
+  awayScore: number;
+  homePlayerIds: string[];
+  awayPlayerIds: string[];
 };
 
 export type CreateAccountPlayerInput = {
@@ -218,6 +255,15 @@ const eventParticipantSelectFields =
 
 const eventPollSelectFields =
   "id, event_id, template_id, title, description, selection_mode, status, opens_at, closes_at, sort_order, created_by, created_at, updated_at";
+
+const eventMatchSelectFields =
+  "id, event_id, title, status, sort_order, starts_at, completed_at, created_by, created_at, updated_at";
+
+const eventMatchTeamSelectFields =
+  "id, match_id, side, name, score, source_team_id, created_at, updated_at";
+
+const eventMatchTeamPlayerSelectFields =
+  "id, team_id, account_player_id, sort_order, created_at";
 
 function normalizeClockTime(value: string) {
   return value.length === 5 ? `${value}:00` : value;
@@ -1591,6 +1637,288 @@ export async function listEventPollResults(eventId: string): Promise<EventPollRe
       entries,
     } satisfies EventPollResultSummary;
   });
+}
+
+async function replaceEventMatchTeamPlayers(teamId: string, orderedPlayerIds: string[]) {
+  const uniqueOrderedPlayerIds = [...new Set(orderedPlayerIds)];
+
+  const { error: deleteError } = await supabase
+    .from("event_match_team_players")
+    .delete()
+    .eq("team_id", teamId);
+
+  throwIfError(deleteError);
+
+  if (uniqueOrderedPlayerIds.length === 0) {
+    return;
+  }
+
+  const { error: insertError } = await supabase.from("event_match_team_players").insert(
+    uniqueOrderedPlayerIds.map((playerId, index) => ({
+      team_id: teamId,
+      account_player_id: playerId,
+      sort_order: index + 1,
+    })),
+  );
+
+  throwIfError(insertError);
+}
+
+export async function listEventMatches(eventId: string): Promise<EventMatchItem[]> {
+  const { data: matchData, error: matchError } = await supabase
+    .from("event_matches")
+    .select(eventMatchSelectFields)
+    .eq("event_id", eventId)
+    .order("sort_order", { ascending: true })
+    .order("created_at", { ascending: true });
+
+  throwIfError(matchError);
+
+  const matches = (matchData ?? []) as EventMatch[];
+
+  if (matches.length === 0) {
+    return [];
+  }
+
+  const matchIds = matches.map((match) => match.id);
+  const { data: teamData, error: teamError } = await supabase
+    .from("event_match_teams")
+    .select(eventMatchTeamSelectFields)
+    .in("match_id", matchIds)
+    .order("created_at", { ascending: true });
+
+  throwIfError(teamError);
+
+  const teams = (teamData ?? []) as EventMatchTeam[];
+
+  if (teams.length === 0) {
+    return matches.map((match) => ({
+      match,
+      homeTeam: null,
+      awayTeam: null,
+    }));
+  }
+
+  const teamIds = teams.map((team) => team.id);
+  const { data: teamPlayerData, error: teamPlayerError } = await supabase
+    .from("event_match_team_players")
+    .select(eventMatchTeamPlayerSelectFields)
+    .in("team_id", teamIds)
+    .order("sort_order", { ascending: true });
+
+  throwIfError(teamPlayerError);
+
+  const teamPlayers = (teamPlayerData ?? []) as EventMatchTeamPlayer[];
+  const playerIds = [...new Set(teamPlayers.map((item) => item.account_player_id))];
+  const { data: playerData, error: playerError } =
+    playerIds.length > 0
+      ? await supabase
+          .from("account_players")
+          .select(
+            "id, account_id, linked_profile_id, full_name, email, photo_url, priority_group_id, is_default_for_weekly_list, is_active, created_by, created_at, updated_at",
+          )
+          .in("id", playerIds)
+      : {
+          data: [] as AccountPlayer[],
+          error: null as { message: string } | null,
+        };
+
+  throwIfError(playerError);
+
+  const playerMap = new Map(((playerData ?? []) as AccountPlayer[]).map((player) => [player.id, player]));
+  const playersByTeam = new Map<string, AccountPlayer[]>();
+
+  for (const teamPlayer of teamPlayers) {
+    const player = playerMap.get(teamPlayer.account_player_id);
+
+    if (!player) {
+      continue;
+    }
+
+    const current = playersByTeam.get(teamPlayer.team_id) ?? [];
+    current.push(player);
+    playersByTeam.set(teamPlayer.team_id, current);
+  }
+
+  const teamsByMatch = new Map<string, EventMatchTeam[]>();
+
+  for (const team of teams) {
+    const current = teamsByMatch.get(team.match_id) ?? [];
+    current.push(team);
+    teamsByMatch.set(team.match_id, current);
+  }
+
+  return matches.map((match) => {
+    const matchTeams = teamsByMatch.get(match.id) ?? [];
+    const homeTeam = matchTeams.find((team) => team.side === "home") ?? null;
+    const awayTeam = matchTeams.find((team) => team.side === "away") ?? null;
+
+    return {
+      match,
+      homeTeam: homeTeam
+        ? {
+            team: homeTeam,
+            players: playersByTeam.get(homeTeam.id) ?? [],
+          }
+        : null,
+      awayTeam: awayTeam
+        ? {
+            team: awayTeam,
+            players: playersByTeam.get(awayTeam.id) ?? [],
+          }
+        : null,
+    } satisfies EventMatchItem;
+  });
+}
+
+export async function createEventMatch(input: CreateEventMatchInput) {
+  const { data: lastMatchData, error: lastMatchError } = await supabase
+    .from("event_matches")
+    .select("sort_order")
+    .eq("event_id", input.eventId)
+    .order("sort_order", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  throwIfError(lastMatchError);
+
+  const nextSortOrder =
+    typeof lastMatchData?.sort_order === "number" ? lastMatchData.sort_order + 1 : 1;
+
+  const { data: matchData, error: matchError } = await supabase
+    .from("event_matches")
+    .insert({
+      event_id: input.eventId,
+      title: input.title.trim() || `Partida ${nextSortOrder}`,
+      status: "draft",
+      sort_order: nextSortOrder,
+      starts_at: new Date().toISOString(),
+      created_by: input.createdBy,
+    })
+    .select(eventMatchSelectFields)
+    .single();
+
+  throwIfError(matchError);
+
+  const match = matchData as EventMatch;
+  const { data: teamData, error: teamError } = await supabase
+    .from("event_match_teams")
+    .insert([
+      {
+        match_id: match.id,
+        side: "home",
+        name: input.homeTeamName.trim() || "Time A",
+        score: 0,
+      },
+      {
+        match_id: match.id,
+        side: "away",
+        name: input.awayTeamName.trim() || "Time B",
+        score: 0,
+      },
+    ])
+    .select(eventMatchTeamSelectFields);
+
+  throwIfError(teamError);
+
+  const teams = (teamData ?? []) as EventMatchTeam[];
+  const homeTeam = teams.find((team) => team.side === "home");
+  const awayTeam = teams.find((team) => team.side === "away");
+
+  if (!homeTeam || !awayTeam) {
+    throw new Error("Nao foi possivel criar os dois times da partida.");
+  }
+
+  await Promise.all([
+    replaceEventMatchTeamPlayers(homeTeam.id, input.homePlayerIds),
+    replaceEventMatchTeamPlayers(awayTeam.id, input.awayPlayerIds),
+  ]);
+
+  return match;
+}
+
+export async function updateEventMatch(input: UpdateEventMatchInput) {
+  const { error: matchError } = await supabase
+    .from("event_matches")
+    .update({
+      title: input.title.trim(),
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", input.matchId);
+
+  throwIfError(matchError);
+
+  const { error: teamError } = await supabase
+    .from("event_match_teams")
+    .upsert(
+      [
+        {
+          id: input.homeTeamId,
+          match_id: input.matchId,
+          side: "home",
+          name: input.homeTeamName.trim() || "Time A",
+          score: input.homeScore,
+        },
+        {
+          id: input.awayTeamId,
+          match_id: input.matchId,
+          side: "away",
+          name: input.awayTeamName.trim() || "Time B",
+          score: input.awayScore,
+        },
+      ],
+      { onConflict: "id" },
+    );
+
+  throwIfError(teamError);
+
+  await Promise.all([
+    replaceEventMatchTeamPlayers(input.homeTeamId, input.homePlayerIds),
+    replaceEventMatchTeamPlayers(input.awayTeamId, input.awayPlayerIds),
+  ]);
+}
+
+export async function copyEventMatchTeamRoster(input: {
+  sourceTeamId: string;
+  targetTeamId: string;
+}) {
+  const { data, error } = await supabase
+    .from("event_match_team_players")
+    .select(eventMatchTeamPlayerSelectFields)
+    .eq("team_id", input.sourceTeamId)
+    .order("sort_order", { ascending: true });
+
+  throwIfError(error);
+
+  const sourcePlayers = (data ?? []) as EventMatchTeamPlayer[];
+  await replaceEventMatchTeamPlayers(
+    input.targetTeamId,
+    sourcePlayers.map((item) => item.account_player_id),
+  );
+
+  const { error: teamError } = await supabase
+    .from("event_match_teams")
+    .update({
+      source_team_id: input.sourceTeamId,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", input.targetTeamId);
+
+  throwIfError(teamError);
+}
+
+export async function completeEventMatch(matchId: string) {
+  const now = new Date().toISOString();
+  const { error } = await supabase
+    .from("event_matches")
+    .update({
+      status: "completed",
+      completed_at: now,
+      updated_at: now,
+    })
+    .eq("id", matchId);
+
+  throwIfError(error);
 }
 
 export async function createWeeklyEventCall(input: {

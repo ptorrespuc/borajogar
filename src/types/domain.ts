@@ -2,6 +2,8 @@ export type AccountRole = "group_admin" | "group_moderator" | "player";
 
 export type EventStatus = "draft" | "published" | "completed" | "cancelled";
 
+export type MatchStatus = "draft" | "completed";
+
 export type ParticipantResponseStatus = "pending" | "confirmed" | "declined";
 
 export type ParticipantSelectionStatus = "active" | "waitlisted" | "removed";
@@ -232,4 +234,38 @@ export type EventParticipantStat = {
   recorded_by: string | null;
   created_at: string;
   updated_at: string;
+};
+
+export type EventMatch = {
+  id: string;
+  event_id: string;
+  title: string;
+  status: MatchStatus;
+  sort_order: number;
+  starts_at: string | null;
+  completed_at: string | null;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type EventMatchTeamSide = "home" | "away";
+
+export type EventMatchTeam = {
+  id: string;
+  match_id: string;
+  side: EventMatchTeamSide;
+  name: string;
+  score: number;
+  source_team_id: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type EventMatchTeamPlayer = {
+  id: string;
+  team_id: string;
+  account_player_id: string;
+  sort_order: number;
+  created_at: string;
 };
