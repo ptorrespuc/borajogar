@@ -2,7 +2,7 @@
   "expo": {
     "name": "BoraJogar",
     "slug": "borajogar",
-    "version": "1.0.0",
+    "version": "1.0.1",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "borajogar",
@@ -42,7 +42,14 @@
       "favicon": "./assets/images/favicon.png"
     },
     "plugins": [
-      "expo-router"
+      "expo-router",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "O BoraJogar precisa acessar sua galeria para definir a foto do jogador.",
+          "microphonePermission": false
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true

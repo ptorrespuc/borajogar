@@ -12,6 +12,7 @@ import {
 } from "react-native";
 
 import Colors from "@/constants/Colors";
+import { PlayerPhotoField } from "@/src/components/player-photo-field";
 import {
   deactivateAccountMembership,
   deactivateAccountPlayer,
@@ -41,6 +42,13 @@ import {
   updateSportsAccountBasics,
   type AccountOverview,
 } from "@/src/lib/accounts";
+import {
+  deleteManagedPlayerPhoto,
+  isManagedPlayerPhotoUrl,
+  pickAndPreparePlayerPhoto,
+  uploadPreparedPlayerPhoto,
+  type PreparedPlayerPhoto,
+} from "@/src/lib/player-photos";
 import { useAuth } from "@/src/providers/auth-provider";
 import type {
   AccountRole,
@@ -269,6 +277,9 @@ export default function HomeScreen() {
   const [membershipNameDraft, setMembershipNameDraft] = useState("");
   const [membershipEmailDraft, setMembershipEmailDraft] = useState("");
   const [membershipPhotoUrlDraft, setMembershipPhotoUrlDraft] = useState("");
+  const [membershipExistingPhotoUrl, setMembershipExistingPhotoUrl] = useState<string | null>(null);
+  const [membershipPreparedPhoto, setMembershipPreparedPhoto] = useState<PreparedPlayerPhoto | null>(null);
+  const [membershipPhotoTouched, setMembershipPhotoTouched] = useState(false);
   const [membershipRoleModalDraft, setMembershipRoleModalDraft] = useState<AccountRole>("player");
   const [membershipPriorityGroupModalId, setMembershipPriorityGroupModalId] = useState<string | null>(null);
   const [membershipProfileIdDraft, setMembershipProfileIdDraft] = useState<string | null>(null);
@@ -282,6 +293,9 @@ export default function HomeScreen() {
   const [playerNameDraft, setPlayerNameDraft] = useState("");
   const [playerEmailDraft, setPlayerEmailDraft] = useState("");
   const [playerPhotoUrlDraft, setPlayerPhotoUrlDraft] = useState("");
+  const [playerExistingPhotoUrl, setPlayerExistingPhotoUrl] = useState<string | null>(null);
+  const [playerPreparedPhoto, setPlayerPreparedPhoto] = useState<PreparedPlayerPhoto | null>(null);
+  const [playerPhotoTouched, setPlayerPhotoTouched] = useState(false);
   const [playerPriorityGroupDraftId, setPlayerPriorityGroupDraftId] = useState<string | null>(null);
   const [playerPreferredPositionIds, setPlayerPreferredPositionIds] = useState<string[]>([]);
   const [playerWeeklyDefaultDraft, setPlayerWeeklyDefaultDraft] = useState(true);
@@ -796,6 +810,9 @@ export default function HomeScreen() {
     setMembershipNameDraft("");
     setMembershipEmailDraft("");
     setMembershipPhotoUrlDraft("");
+    setMembershipExistingPhotoUrl(null);
+    setMembershipPreparedPhoto(null);
+    setMembershipPhotoTouched(false);
     setMembershipRoleModalDraft("player");
     setMembershipProfileIdDraft(null);
     setMembershipPreferredPositionIds([]);
@@ -808,6 +825,9 @@ export default function HomeScreen() {
     setPlayerNameDraft("");
     setPlayerEmailDraft("");
     setPlayerPhotoUrlDraft("");
+    setPlayerExistingPhotoUrl(null);
+    setPlayerPreparedPhoto(null);
+    setPlayerPhotoTouched(false);
     setPlayerPriorityGroupDraftId(overview?.priorityGroups[0]?.id ?? null);
     setPlayerPreferredPositionIds([]);
     setPlayerWeeklyDefaultDraft(true);
@@ -925,6 +945,9 @@ export default function HomeScreen() {
       setMembershipNameDraft(item.profile.full_name);
       setMembershipEmailDraft(item.profile.email);
       setMembershipPhotoUrlDraft(item.profile.photo_url ?? "");
+      setMembershipExistingPhotoUrl(item.profile.photo_url ?? null);
+      setMembershipPreparedPhoto(null);
+      setMembershipPhotoTouched(false);
       setMembershipRoleModalDraft(item.membership.role);
       setMembershipProfileIdDraft(item.profile.id);
       await hydrateMembershipPriorityOptions(item.account.id, item.priorityGroup?.id ?? null);
@@ -939,6 +962,7 @@ export default function HomeScreen() {
 
       setMembershipNameDraft(linkedPlayer?.player.full_name ?? item.profile.full_name);
       setMembershipPhotoUrlDraft(linkedPlayer?.player.photo_url ?? item.profile.photo_url ?? "");
+      setMembershipExistingPhotoUrl(linkedPlayer?.player.photo_url ?? item.profile.photo_url ?? null);
       setMembershipPreferredPositionIds(
         linkedPlayer?.preferredPositions.map((position) => position.id) ?? [],
       );
@@ -972,6 +996,9 @@ export default function HomeScreen() {
     setPlayerNameDraft(item.player.full_name);
     setPlayerEmailDraft(item.player.email ?? "");
     setPlayerPhotoUrlDraft(item.player.photo_url ?? "");
+    setPlayerExistingPhotoUrl(item.player.photo_url ?? null);
+    setPlayerPreparedPhoto(null);
+    setPlayerPhotoTouched(false);
     setPlayerPriorityGroupDraftId(item.player.priority_group_id ?? overview.priorityGroups[0]?.id ?? null);
     setPlayerPreferredPositionIds(item.preferredPositions.map((position) => position.id));
     setPlayerWeeklyDefaultDraft(item.player.is_default_for_weekly_list);
@@ -1343,16 +1370,45 @@ export default function HomeScreen() {
       profileLabel = linkedProfile.full_name || linkedProfile.email;
 
       if (membershipRoleModalDraft === "player" && profileId && profile?.id) {
+        const desiredPhotoUrl = membershipPhotoTouched
+          ? membershipPhotoUrlDraft.trim() || null
+          : membershipPhotoUrlDraft.trim() || linkedProfile.photo_url || null;
         const linkedPlayer = await upsertAccountPlayerFromAccess({
           accountId: membershipAccountIdDraft,
           fullName: membershipNameDraft.trim(),
           email: normalizedEmail,
-          photoUrl: membershipPhotoUrlDraft.trim() || linkedProfile.photo_url || null,
+          photoUrl: desiredPhotoUrl,
           linkedProfileId: profileId,
           priorityGroupId: membershipPriorityGroupModalId,
           preferredPositionIds: membershipPreferredPositionIds,
           createdBy: profile.id,
         });
+
+        if (membershipPreparedPhoto) {
+          const uploadedPhotoUrl = await uploadPreparedPlayerPhoto({
+            accountId: membershipAccountIdDraft,
+            playerId: linkedPlayer.id,
+            preparedPhoto: membershipPreparedPhoto,
+            existingPhotoUrl: membershipExistingPhotoUrl,
+          });
+
+          await updateAccountPlayer({
+            playerId: linkedPlayer.id,
+            fullName: membershipNameDraft.trim(),
+            email: normalizedEmail,
+            photoUrl: uploadedPhotoUrl,
+            linkedProfileId: profileId,
+            priorityGroupId: membershipPriorityGroupModalId,
+            isDefaultForWeeklyList: linkedPlayer.is_default_for_weekly_list,
+            preferredPositionIds: membershipPreferredPositionIds,
+          });
+        } else if (
+          membershipPhotoTouched &&
+          !desiredPhotoUrl &&
+          isManagedPlayerPhotoUrl(membershipExistingPhotoUrl)
+        ) {
+          await deleteManagedPlayerPhoto(membershipExistingPhotoUrl);
+        }
 
         accountPlayerId = linkedPlayer.id;
       }
@@ -1419,6 +1475,48 @@ export default function HomeScreen() {
     );
   }
 
+  async function handlePickMembershipPhoto() {
+    try {
+      const preparedPhoto = await pickAndPreparePlayerPhoto();
+
+      if (!preparedPhoto) {
+        return;
+      }
+
+      setMembershipPreparedPhoto(preparedPhoto);
+      setMembershipPhotoTouched(true);
+    } catch (photoError) {
+      setMessage({ tone: "error", text: getReadableError(photoError) });
+    }
+  }
+
+  function handleClearMembershipPhoto() {
+    setMembershipPreparedPhoto(null);
+    setMembershipPhotoUrlDraft("");
+    setMembershipPhotoTouched(true);
+  }
+
+  async function handlePickPlayerPhoto() {
+    try {
+      const preparedPhoto = await pickAndPreparePlayerPhoto();
+
+      if (!preparedPhoto) {
+        return;
+      }
+
+      setPlayerPreparedPhoto(preparedPhoto);
+      setPlayerPhotoTouched(true);
+    } catch (photoError) {
+      setMessage({ tone: "error", text: getReadableError(photoError) });
+    }
+  }
+
+  function handleClearPlayerPhoto() {
+    setPlayerPreparedPhoto(null);
+    setPlayerPhotoUrlDraft("");
+    setPlayerPhotoTouched(true);
+  }
+
   async function handleSavePlayer() {
     if (!selectedAccess || !overview || !profile) {
       return;
@@ -1440,30 +1538,57 @@ export default function HomeScreen() {
     try {
       const linkedProfileId = await resolveLinkedProfileId(playerEmailDraft);
       const isEditing = adminModal?.type === "player" && adminModal.mode === "edit" && adminModal.targetId;
+      const normalizedPlayerEmail = playerEmailDraft.trim().toLowerCase() || null;
+      const desiredPhotoUrl = playerPhotoTouched ? playerPhotoUrlDraft.trim() || null : playerPhotoUrlDraft.trim() || null;
+      let savedPlayerId: string | null = null;
 
       if (isEditing && adminModal.targetId) {
         await updateAccountPlayer({
           playerId: adminModal.targetId,
           fullName: playerNameDraft.trim(),
-          email: playerEmailDraft.trim() || null,
-          photoUrl: playerPhotoUrlDraft.trim() || null,
+          email: normalizedPlayerEmail,
+          photoUrl: desiredPhotoUrl,
           linkedProfileId,
           priorityGroupId: playerPriorityGroupDraftId,
           isDefaultForWeeklyList: playerWeeklyDefaultDraft,
           preferredPositionIds: playerPreferredPositionIds,
         });
+        savedPlayerId = adminModal.targetId;
       } else {
-        await createAccountPlayer({
+        const createdPlayer = await createAccountPlayer({
           accountId: selectedAccess.account.id,
           fullName: playerNameDraft.trim(),
-          email: playerEmailDraft.trim() || null,
-          photoUrl: playerPhotoUrlDraft.trim() || null,
+          email: normalizedPlayerEmail,
+          photoUrl: desiredPhotoUrl,
           linkedProfileId,
           priorityGroupId: playerPriorityGroupDraftId,
           isDefaultForWeeklyList: playerWeeklyDefaultDraft,
           createdBy: profile.id,
           preferredPositionIds: playerPreferredPositionIds,
         });
+        savedPlayerId = createdPlayer.id;
+      }
+
+      if (savedPlayerId && playerPreparedPhoto) {
+        const uploadedPhotoUrl = await uploadPreparedPlayerPhoto({
+          accountId: selectedAccess.account.id,
+          playerId: savedPlayerId,
+          preparedPhoto: playerPreparedPhoto,
+          existingPhotoUrl: playerExistingPhotoUrl,
+        });
+
+        await updateAccountPlayer({
+          playerId: savedPlayerId,
+          fullName: playerNameDraft.trim(),
+          email: normalizedPlayerEmail,
+          photoUrl: uploadedPhotoUrl,
+          linkedProfileId,
+          priorityGroupId: playerPriorityGroupDraftId,
+          isDefaultForWeeklyList: playerWeeklyDefaultDraft,
+          preferredPositionIds: playerPreferredPositionIds,
+        });
+      } else if (playerPhotoTouched && !desiredPhotoUrl && isManagedPlayerPhotoUrl(playerExistingPhotoUrl)) {
+        await deleteManagedPlayerPhoto(playerExistingPhotoUrl);
       }
 
       await reloadSelectedWorkspace();
@@ -2081,18 +2206,6 @@ export default function HomeScreen() {
                       </View>
 
                       <View style={styles.fieldBlock}>
-                        <Text style={styles.label}>Foto do jogador</Text>
-                        <TextInput
-                          value={membershipPhotoUrlDraft}
-                          onChangeText={setMembershipPhotoUrlDraft}
-                          placeholder="https://..."
-                          placeholderTextColor={Colors.textMuted}
-                          autoCapitalize="none"
-                          style={styles.input}
-                        />
-                      </View>
-
-                      <View style={styles.fieldBlock}>
                         <Text style={styles.label}>Papel na conta</Text>
                         <View style={styles.chips}>
                           {(Object.entries(roleLabels) as [AccountRole, string][]).map(([role, label]) => (
@@ -2119,6 +2232,15 @@ export default function HomeScreen() {
                     {membershipRoleModalDraft === "player" ? (
                       <View style={styles.formSection}>
                         <Text style={styles.formSectionTitle}>Dados esportivos do jogador</Text>
+
+                        <PlayerPhotoField
+                          label="Foto do jogador"
+                          hint="O BoraJogar abre o recorte quadrado no preview, reduz para 500x500 e salva uma versao leve."
+                          previewUri={(membershipPreparedPhoto?.uri ?? membershipPhotoUrlDraft.trim()) || null}
+                          onPick={() => void handlePickMembershipPhoto()}
+                          onClear={handleClearMembershipPhoto}
+                          disabled={isSubmittingModal}
+                        />
 
                         <View style={styles.fieldBlock}>
                           <Text style={styles.label}>Grupo prioritario</Text>
@@ -2218,17 +2340,14 @@ export default function HomeScreen() {
                         />
                       </View>
 
-                      <View style={styles.fieldBlock}>
-                        <Text style={styles.label}>Foto do jogador</Text>
-                        <TextInput
-                          value={playerPhotoUrlDraft}
-                          onChangeText={setPlayerPhotoUrlDraft}
-                          placeholder="https://..."
-                          placeholderTextColor={Colors.textMuted}
-                          autoCapitalize="none"
-                          style={styles.input}
-                        />
-                      </View>
+                      <PlayerPhotoField
+                        label="Foto do jogador"
+                        hint="Use uma imagem quadrada ou recorte no preview. O upload salva uma versao 500x500."
+                        previewUri={(playerPreparedPhoto?.uri ?? playerPhotoUrlDraft.trim()) || null}
+                        onPick={() => void handlePickPlayerPhoto()}
+                        onClear={handleClearPlayerPhoto}
+                        disabled={isSubmittingModal}
+                      />
                     </View>
 
                     <View style={styles.formSection}>
