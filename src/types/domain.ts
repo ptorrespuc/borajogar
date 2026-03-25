@@ -83,12 +83,36 @@ export type AccountMembership = {
   id: string;
   account_id: string;
   profile_id: string;
+  account_player_id: string | null;
   role: AccountRole;
   priority_group_id: string | null;
   is_active: boolean;
   joined_at: string;
   created_at: string;
   updated_at: string;
+};
+
+export type AccountPlayer = {
+  id: string;
+  account_id: string;
+  linked_profile_id: string | null;
+  full_name: string;
+  email: string | null;
+  photo_url: string | null;
+  priority_group_id: string | null;
+  is_default_for_weekly_list: boolean;
+  is_active: boolean;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type AccountPlayerPositionPreference = {
+  id: string;
+  account_player_id: string;
+  modality_position_id: string;
+  preference_order: number;
+  created_at: string;
 };
 
 export type MembershipPositionPreference = {

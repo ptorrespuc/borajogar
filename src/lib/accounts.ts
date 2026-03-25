@@ -1,10 +1,13 @@
 import { supabase } from "@/src/lib/supabase";
 import type {
+  AccountPlayer,
+  AccountPlayerPositionPreference,
   AccountRole,
   AccountMembership,
   AccountPriorityGroup,
   AccountSchedule,
   ModalityPosition,
+  PollTemplate,
   Profile,
   SportModality,
   SportsAccount,
@@ -16,6 +19,8 @@ export type AccountOverview = {
   schedules: AccountSchedule[];
   priorityGroups: AccountPriorityGroup[];
   activeMemberCount: number;
+  activePlayerCount: number;
+  activePollTemplateCount: number;
 };
 
 export type RosterMember = {
@@ -30,6 +35,49 @@ export type AccountMembershipAdminItem = {
   account: SportsAccount;
   profile: Profile;
   priorityGroup: AccountPriorityGroup | null;
+};
+
+export type AccountPlayerAdminItem = {
+  player: AccountPlayer;
+  linkedProfile: Profile | null;
+  priorityGroup: AccountPriorityGroup | null;
+  preferredPositions: ModalityPosition[];
+};
+
+export type CreateAccountPlayerInput = {
+  accountId: string;
+  fullName: string;
+  email: string | null;
+  linkedProfileId: string | null;
+  priorityGroupId: string | null;
+  isDefaultForWeeklyList: boolean;
+  createdBy: string;
+  preferredPositionIds: string[];
+};
+
+export type UpdateAccountPlayerInput = {
+  playerId: string;
+  fullName: string;
+  email: string | null;
+  linkedProfileId: string | null;
+  priorityGroupId: string | null;
+  isDefaultForWeeklyList: boolean;
+  preferredPositionIds: string[];
+};
+
+export type CreatePollTemplateInput = {
+  accountId: string;
+  title: string;
+  description: string | null;
+  selectionMode: "predefined_options" | "event_participant";
+  createdBy: string;
+};
+
+export type UpdatePollTemplateInput = {
+  pollTemplateId: string;
+  title: string;
+  description: string | null;
+  selectionMode: "predefined_options" | "event_participant";
 };
 
 export type CreateSportsAccountInput = {
@@ -147,7 +195,7 @@ export async function listAllAccountMemberships(): Promise<AccountMembershipAdmi
   const { data: membershipData, error: membershipError } = await supabase
     .from("account_memberships")
     .select(
-      "id, account_id, profile_id, role, priority_group_id, is_active, joined_at, created_at, updated_at",
+      "id, account_id, profile_id, account_player_id, role, priority_group_id, is_active, joined_at, created_at, updated_at",
     )
     .eq("is_active", true)
     .order("joined_at", { ascending: true });
@@ -254,6 +302,8 @@ export async function getAccountOverview(accountId: string): Promise<AccountOver
     { data: scheduleData, error: scheduleError },
     { data: priorityGroupData, error: priorityGroupError },
     { data: membershipData, error: membershipError },
+    { data: playerData, error: playerError },
+    { data: pollTemplateData, error: pollTemplateError },
   ] = await Promise.all([
     supabase
       .from("sport_modalities")
@@ -278,12 +328,24 @@ export async function getAccountOverview(accountId: string): Promise<AccountOver
       .select("id")
       .eq("account_id", accountId)
       .eq("is_active", true),
+    supabase
+      .from("account_players")
+      .select("id")
+      .eq("account_id", accountId)
+      .eq("is_active", true),
+    supabase
+      .from("poll_templates")
+      .select("id")
+      .eq("account_id", accountId)
+      .eq("is_active", true),
   ]);
 
   throwIfError(modalityError);
   throwIfError(scheduleError);
   throwIfError(priorityGroupError);
   throwIfError(membershipError);
+  throwIfError(playerError);
+  throwIfError(pollTemplateError);
 
   return {
     account,
@@ -291,6 +353,8 @@ export async function getAccountOverview(accountId: string): Promise<AccountOver
     schedules: (scheduleData ?? []) as AccountSchedule[],
     priorityGroups: (priorityGroupData ?? []) as AccountPriorityGroup[],
     activeMemberCount: (membershipData ?? []).length,
+    activePlayerCount: (playerData ?? []).length,
+    activePollTemplateCount: (pollTemplateData ?? []).length,
   };
 }
 
@@ -312,7 +376,7 @@ export async function listAccountRoster(
   const { data: membershipData, error: membershipError } = await supabase
     .from("account_memberships")
     .select(
-      "id, account_id, profile_id, role, priority_group_id, is_active, joined_at, created_at, updated_at",
+      "id, account_id, profile_id, account_player_id, role, priority_group_id, is_active, joined_at, created_at, updated_at",
     )
     .eq("account_id", accountId)
     .eq("is_active", true)
@@ -747,6 +811,306 @@ export async function updateSportsAccount(input: UpdateSportsAccountInput) {
   }
 }
 
+async function replaceAccountPlayerPositionPreferences(
+  accountPlayerId: string,
+  orderedPositionIds: string[],
+) {
+  const uniqueOrderedPositionIds = [...new Set(orderedPositionIds)];
+
+  const { error: deleteError } = await supabase
+    .from("account_player_position_preferences")
+    .delete()
+    .eq("account_player_id", accountPlayerId);
+
+  throwIfError(deleteError);
+
+  if (uniqueOrderedPositionIds.length === 0) {
+    return;
+  }
+
+  const { error: insertError } = await supabase
+    .from("account_player_position_preferences")
+    .insert(
+      uniqueOrderedPositionIds.map((positionId, index) => ({
+        account_player_id: accountPlayerId,
+        modality_position_id: positionId,
+        preference_order: index + 1,
+      })),
+    );
+
+  throwIfError(insertError);
+}
+
+async function syncPlayerMembership(input: {
+  accountId: string;
+  linkedProfileId: string | null;
+  accountPlayerId: string;
+  priorityGroupId: string | null;
+}) {
+  if (!input.linkedProfileId) {
+    return;
+  }
+
+  await upsertAccountMembership({
+    accountId: input.accountId,
+    profileId: input.linkedProfileId,
+    accountPlayerId: input.accountPlayerId,
+    role: "player",
+    priorityGroupId: input.priorityGroupId,
+  });
+}
+
+export async function listAccountPlayers(
+  accountId: string,
+  modalityId: string,
+): Promise<AccountPlayerAdminItem[]> {
+  const { data: playerData, error: playerError } = await supabase
+    .from("account_players")
+    .select(
+      "id, account_id, linked_profile_id, full_name, email, photo_url, priority_group_id, is_default_for_weekly_list, is_active, created_by, created_at, updated_at",
+    )
+    .eq("account_id", accountId)
+    .eq("is_active", true)
+    .order("full_name", { ascending: true });
+
+  throwIfError(playerError);
+
+  const players = (playerData ?? []) as AccountPlayer[];
+
+  if (players.length === 0) {
+    return [];
+  }
+
+  const linkedProfileIds = [
+    ...new Set(players.map((player) => player.linked_profile_id).filter((value): value is string => Boolean(value))),
+  ];
+  const priorityGroupIds = [
+    ...new Set(players.map((player) => player.priority_group_id).filter((value): value is string => Boolean(value))),
+  ];
+  const playerIds = players.map((player) => player.id);
+
+  const [
+    { data: profileData, error: profileError },
+    { data: priorityGroupData, error: priorityGroupError },
+    { data: preferenceData, error: preferenceError },
+    { data: positionData, error: positionError },
+  ] = await Promise.all([
+    linkedProfileIds.length > 0
+      ? supabase
+          .from("profiles")
+          .select("id, full_name, email, photo_url, is_super_admin, created_at, updated_at")
+          .in("id", linkedProfileIds)
+      : Promise.resolve({ data: [] as Profile[], error: null as { message: string } | null }),
+    priorityGroupIds.length > 0
+      ? supabase
+          .from("account_priority_groups")
+          .select("id, account_id, name, priority_rank, color_hex, is_active, created_at, updated_at")
+          .in("id", priorityGroupIds)
+      : Promise.resolve({
+          data: [] as AccountPriorityGroup[],
+          error: null as { message: string } | null,
+        }),
+    supabase
+      .from("account_player_position_preferences")
+      .select("id, account_player_id, modality_position_id, preference_order, created_at")
+      .in("account_player_id", playerIds)
+      .order("preference_order", { ascending: true }),
+    supabase
+      .from("modality_positions")
+      .select("id, modality_id, name, code, sort_order, created_at, updated_at")
+      .eq("modality_id", modalityId)
+      .order("sort_order", { ascending: true }),
+  ]);
+
+  throwIfError(profileError);
+  throwIfError(priorityGroupError);
+  throwIfError(preferenceError);
+  throwIfError(positionError);
+
+  const profileMap = new Map(((profileData ?? []) as Profile[]).map((profile) => [profile.id, profile]));
+  const priorityGroupMap = new Map(
+    ((priorityGroupData ?? []) as AccountPriorityGroup[]).map((group) => [group.id, group]),
+  );
+  const positionMap = new Map(
+    ((positionData ?? []) as ModalityPosition[]).map((position) => [position.id, position]),
+  );
+  const preferencesByPlayer = new Map<string, ModalityPosition[]>();
+
+  for (const preference of (preferenceData ?? []) as AccountPlayerPositionPreference[]) {
+    const position = positionMap.get(preference.modality_position_id);
+
+    if (!position) {
+      continue;
+    }
+
+    const current = preferencesByPlayer.get(preference.account_player_id) ?? [];
+    current.push(position);
+    preferencesByPlayer.set(preference.account_player_id, current);
+  }
+
+  return players.map((player) => ({
+    player,
+    linkedProfile: player.linked_profile_id ? profileMap.get(player.linked_profile_id) ?? null : null,
+    priorityGroup: player.priority_group_id ? priorityGroupMap.get(player.priority_group_id) ?? null : null,
+    preferredPositions: preferencesByPlayer.get(player.id) ?? [],
+  }));
+}
+
+export async function createAccountPlayer(input: CreateAccountPlayerInput) {
+  const normalizedEmail = input.email?.trim().toLowerCase() || null;
+
+  const { data: playerData, error: playerError } = await supabase
+    .from("account_players")
+    .insert({
+      account_id: input.accountId,
+      linked_profile_id: input.linkedProfileId,
+      full_name: input.fullName,
+      email: normalizedEmail,
+      priority_group_id: input.priorityGroupId,
+      is_default_for_weekly_list: input.isDefaultForWeeklyList,
+      is_active: true,
+      created_by: input.createdBy,
+    })
+    .select(
+      "id, account_id, linked_profile_id, full_name, email, photo_url, priority_group_id, is_default_for_weekly_list, is_active, created_by, created_at, updated_at",
+    )
+    .single();
+
+  throwIfError(playerError);
+
+  const player = playerData as AccountPlayer;
+
+  await replaceAccountPlayerPositionPreferences(player.id, input.preferredPositionIds);
+  await syncPlayerMembership({
+    accountId: input.accountId,
+    linkedProfileId: input.linkedProfileId,
+    accountPlayerId: player.id,
+    priorityGroupId: input.priorityGroupId,
+  });
+
+  return player;
+}
+
+export async function updateAccountPlayer(input: UpdateAccountPlayerInput) {
+  const { data: existingPlayerData, error: existingPlayerError } = await supabase
+    .from("account_players")
+    .select(
+      "id, account_id, linked_profile_id, full_name, email, photo_url, priority_group_id, is_default_for_weekly_list, is_active, created_by, created_at, updated_at",
+    )
+    .eq("id", input.playerId)
+    .single();
+
+  throwIfError(existingPlayerError);
+
+  const existingPlayer = existingPlayerData as AccountPlayer;
+  const normalizedEmail = input.email?.trim().toLowerCase() || null;
+
+  const { error: updateError } = await supabase
+    .from("account_players")
+    .update({
+      linked_profile_id: input.linkedProfileId,
+      full_name: input.fullName,
+      email: normalizedEmail,
+      priority_group_id: input.priorityGroupId,
+      is_default_for_weekly_list: input.isDefaultForWeeklyList,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", input.playerId);
+
+  throwIfError(updateError);
+
+  await replaceAccountPlayerPositionPreferences(input.playerId, input.preferredPositionIds);
+  await syncPlayerMembership({
+    accountId: existingPlayer.account_id,
+    linkedProfileId: input.linkedProfileId,
+    accountPlayerId: input.playerId,
+    priorityGroupId: input.priorityGroupId,
+  });
+}
+
+export async function deactivateAccountPlayer(playerId: string) {
+  const { error } = await supabase
+    .from("account_players")
+    .update({
+      is_active: false,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", playerId);
+
+  throwIfError(error);
+}
+
+export async function listAccountPollTemplates(accountId: string): Promise<PollTemplate[]> {
+  const { data, error } = await supabase
+    .from("poll_templates")
+    .select("id, account_id, title, description, selection_mode, is_active, sort_order, created_by, created_at, updated_at")
+    .eq("account_id", accountId)
+    .eq("is_active", true)
+    .order("sort_order", { ascending: true })
+    .order("title", { ascending: true });
+
+  throwIfError(error);
+  return (data ?? []) as PollTemplate[];
+}
+
+export async function createPollTemplate(input: CreatePollTemplateInput) {
+  const { data: lastTemplateData, error: lastTemplateError } = await supabase
+    .from("poll_templates")
+    .select("sort_order")
+    .eq("account_id", input.accountId)
+    .order("sort_order", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  throwIfError(lastTemplateError);
+
+  const nextSortOrder =
+    typeof lastTemplateData?.sort_order === "number" ? lastTemplateData.sort_order + 1 : 1;
+
+  const { data, error } = await supabase
+    .from("poll_templates")
+    .insert({
+      account_id: input.accountId,
+      title: input.title,
+      description: input.description,
+      selection_mode: input.selectionMode,
+      is_active: true,
+      sort_order: nextSortOrder,
+      created_by: input.createdBy,
+    })
+    .select("id, account_id, title, description, selection_mode, is_active, sort_order, created_by, created_at, updated_at")
+    .single();
+
+  throwIfError(error);
+  return data as PollTemplate;
+}
+
+export async function updatePollTemplate(input: UpdatePollTemplateInput) {
+  const { error } = await supabase
+    .from("poll_templates")
+    .update({
+      title: input.title,
+      description: input.description,
+      selection_mode: input.selectionMode,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", input.pollTemplateId);
+
+  throwIfError(error);
+}
+
+export async function archivePollTemplate(pollTemplateId: string) {
+  const { error } = await supabase
+    .from("poll_templates")
+    .update({
+      is_active: false,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", pollTemplateId);
+
+  throwIfError(error);
+}
+
 export async function deleteSportModality(modalityId: string) {
   const { error } = await supabase.from("sport_modalities").delete().eq("id", modalityId);
 
@@ -762,6 +1126,7 @@ export async function deleteSportsAccount(accountId: string) {
 export async function upsertAccountMembership(input: {
   accountId: string;
   profileId: string;
+  accountPlayerId?: string | null;
   role: AccountRole;
   priorityGroupId: string | null;
 }) {
@@ -769,6 +1134,7 @@ export async function upsertAccountMembership(input: {
     {
       account_id: input.accountId,
       profile_id: input.profileId,
+      account_player_id: input.accountPlayerId ?? null,
       role: input.role,
       priority_group_id: input.priorityGroupId,
       is_active: true,

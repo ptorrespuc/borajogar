@@ -14,25 +14,41 @@ import {
 import Colors from "@/constants/Colors";
 import {
   deactivateAccountMembership,
+  deactivateAccountPlayer,
+  archivePollTemplate,
   type AccountMembershipAdminItem,
+  type AccountPlayerAdminItem,
+  createAccountPlayer,
   createSportModality,
   createSportsAccount,
+  createPollTemplate,
   deleteSportModality,
   deleteSportsAccount,
   findProfileByEmail,
   listAllAccountMemberships,
+  listAccountPlayers,
+  listAccountPollTemplates,
   getAccountOverview,
   listModalityPositions,
   listAllSportsAccounts,
   listSportModalities,
   updateSportModality,
+  updateAccountPlayer,
+  updatePollTemplate,
   updateSportsAccount,
   upsertAccountMembership,
   updateSportsAccountBasics,
   type AccountOverview,
 } from "@/src/lib/accounts";
 import { useAuth } from "@/src/providers/auth-provider";
-import type { AccountRole, SportModality, SportsAccount } from "@/src/types/domain";
+import type {
+  AccountRole,
+  ModalityPosition,
+  PollSelectionMode,
+  PollTemplate,
+  SportModality,
+  SportsAccount,
+} from "@/src/types/domain";
 
 const roleLabels: Record<AccountRole, string> = {
   group_admin: "Admin do grupo",
@@ -48,6 +64,19 @@ const weekdayLabels = [
   "Quinta",
   "Sexta",
   "Sabado",
+];
+
+const pollModeOptions: PollModeOption[] = [
+  {
+    value: "event_participant",
+    label: "Qualquer jogador",
+    description: "A enquete permite voto em qualquer jogador da lista do evento.",
+  },
+  {
+    value: "predefined_options",
+    label: "Opcoes fechadas",
+    description: "A enquete usa opcoes cadastradas manualmente, como gols especificos.",
+  },
 ];
 
 const priorityColors = ["#1d7f46", "#5a9b3c", "#88938c", "#4d7c66", "#9aac8f"];
@@ -67,12 +96,19 @@ type AccountAccessItem = {
   priorityGroupName: string | null;
 };
 
+type PollModeOption = {
+  value: PollSelectionMode;
+  label: string;
+  description: string;
+};
+
 type AdminTab = "modalities" | "accounts" | "memberships";
+type AccountWorkspaceTab = "players" | "polls" | "weekly";
 
 type AdminModalState =
   | null
   | {
-      type: "modality" | "account" | "membership";
+      type: "modality" | "account" | "membership" | "player" | "poll";
       mode: "create" | "edit";
       targetId?: string;
     };
@@ -151,6 +187,11 @@ export default function HomeScreen() {
   const [overview, setOverview] = useState<AccountOverview | null>(null);
   const [overviewError, setOverviewError] = useState<string | null>(null);
   const [isOverviewLoading, setIsOverviewLoading] = useState(false);
+  const [workspaceTab, setWorkspaceTab] = useState<AccountWorkspaceTab>("players");
+  const [accountPlayers, setAccountPlayers] = useState<AccountPlayerAdminItem[]>([]);
+  const [accountPollTemplates, setAccountPollTemplates] = useState<PollTemplate[]>([]);
+  const [modalityPositions, setModalityPositions] = useState<ModalityPosition[]>([]);
+  const [isWorkspaceLoading, setIsWorkspaceLoading] = useState(false);
   const [isAdminLoading, setIsAdminLoading] = useState(false);
   const [isSavingAccount, setIsSavingAccount] = useState(false);
   const [message, setMessage] = useState<{ tone: "success" | "error"; text: string } | null>(null);
@@ -189,6 +230,15 @@ export default function HomeScreen() {
     name: string;
     priority_rank: number;
   }>>([]);
+  const [playerNameDraft, setPlayerNameDraft] = useState("");
+  const [playerEmailDraft, setPlayerEmailDraft] = useState("");
+  const [playerPriorityGroupDraftId, setPlayerPriorityGroupDraftId] = useState<string | null>(null);
+  const [playerPreferredPositionIds, setPlayerPreferredPositionIds] = useState<string[]>([]);
+  const [playerWeeklyDefaultDraft, setPlayerWeeklyDefaultDraft] = useState(true);
+  const [pollTitleDraft, setPollTitleDraft] = useState("");
+  const [pollDescriptionDraft, setPollDescriptionDraft] = useState("");
+  const [pollSelectionModeDraft, setPollSelectionModeDraft] =
+    useState<PollSelectionMode>("event_participant");
 
   useEffect(() => {
     if (adminModal?.type === "account" && adminModal.mode === "edit") {
@@ -357,6 +407,60 @@ export default function HomeScreen() {
   }, [overview]);
 
   useEffect(() => {
+    let isActive = true;
+
+    async function loadWorkspaceData() {
+      const canManageCurrentAccount = Boolean(
+        profile?.is_super_admin || selectedMembership?.membership.role === "group_admin",
+      );
+
+      if (!selectedAccess || !overview || !canManageCurrentAccount) {
+        setAccountPlayers([]);
+        setAccountPollTemplates([]);
+        setModalityPositions([]);
+        return;
+      }
+
+      setIsWorkspaceLoading(true);
+
+      try {
+        const [nextPlayers, nextPollTemplates, nextPositions] = await Promise.all([
+          listAccountPlayers(selectedAccess.account.id, overview.account.modality_id),
+          listAccountPollTemplates(selectedAccess.account.id),
+          listModalityPositions(overview.account.modality_id),
+        ]);
+
+        if (!isActive) {
+          return;
+        }
+
+        setAccountPlayers(nextPlayers);
+        setAccountPollTemplates(nextPollTemplates);
+        setModalityPositions(nextPositions);
+      } catch (loadError) {
+        if (isActive) {
+          setMessage({ tone: "error", text: getReadableError(loadError) });
+        }
+      } finally {
+        if (isActive) {
+          setIsWorkspaceLoading(false);
+        }
+      }
+    }
+
+    void loadWorkspaceData();
+
+    return () => {
+      isActive = false;
+    };
+  }, [
+    overview,
+    profile?.is_super_admin,
+    selectedAccess,
+    selectedMembership?.membership.role,
+  ]);
+
+  useEffect(() => {
     if (adminModal?.type !== "membership" || adminModal.mode !== "create") {
       return;
     }
@@ -452,6 +556,25 @@ export default function HomeScreen() {
     }
 
     setAdminMemberships(await listAllAccountMemberships());
+  }
+
+  async function reloadSelectedWorkspace() {
+    if (!selectedAccess || !overview) {
+      setAccountPlayers([]);
+      setAccountPollTemplates([]);
+      setModalityPositions([]);
+      return;
+    }
+
+    const [nextPlayers, nextPollTemplates, nextPositions] = await Promise.all([
+      listAccountPlayers(selectedAccess.account.id, overview.account.modality_id),
+      listAccountPollTemplates(selectedAccess.account.id),
+      listModalityPositions(overview.account.modality_id),
+    ]);
+
+    setAccountPlayers(nextPlayers);
+    setAccountPollTemplates(nextPollTemplates);
+    setModalityPositions(nextPositions);
   }
 
   function resetModalityForm() {
@@ -558,6 +681,20 @@ export default function HomeScreen() {
     setMembershipProfileIdDraft(null);
     setMembershipPriorityOptions([]);
     setMembershipPriorityGroupModalId(null);
+  }
+
+  function resetPlayerForm() {
+    setPlayerNameDraft("");
+    setPlayerEmailDraft("");
+    setPlayerPriorityGroupDraftId(overview?.priorityGroups[0]?.id ?? null);
+    setPlayerPreferredPositionIds([]);
+    setPlayerWeeklyDefaultDraft(true);
+  }
+
+  function resetPollForm() {
+    setPollTitleDraft("");
+    setPollDescriptionDraft("");
+    setPollSelectionModeDraft("event_participant");
   }
 
   function closeAdminModal() {
@@ -673,6 +810,60 @@ export default function HomeScreen() {
     } finally {
       setIsModalLoading(false);
     }
+  }
+
+  function openCreatePlayerModal() {
+    if (!selectedAccess || !overview) {
+      setMessage({ tone: "error", text: "Selecione uma conta esportiva para cadastrar jogadores." });
+      return;
+    }
+
+    resetPlayerForm();
+    setAdminModal({
+      type: "player",
+      mode: "create",
+    });
+  }
+
+  function openEditPlayerModal(item: AccountPlayerAdminItem) {
+    if (!overview) {
+      return;
+    }
+
+    setPlayerNameDraft(item.player.full_name);
+    setPlayerEmailDraft(item.player.email ?? "");
+    setPlayerPriorityGroupDraftId(item.player.priority_group_id ?? overview.priorityGroups[0]?.id ?? null);
+    setPlayerPreferredPositionIds(item.preferredPositions.map((position) => position.id));
+    setPlayerWeeklyDefaultDraft(item.player.is_default_for_weekly_list);
+    setAdminModal({
+      type: "player",
+      mode: "edit",
+      targetId: item.player.id,
+    });
+  }
+
+  function openCreatePollModal() {
+    if (!selectedAccess) {
+      setMessage({ tone: "error", text: "Selecione uma conta esportiva para cadastrar enquetes." });
+      return;
+    }
+
+    resetPollForm();
+    setAdminModal({
+      type: "poll",
+      mode: "create",
+    });
+  }
+
+  function openEditPollModal(pollTemplate: PollTemplate) {
+    setPollTitleDraft(pollTemplate.title);
+    setPollDescriptionDraft(pollTemplate.description ?? "");
+    setPollSelectionModeDraft(pollTemplate.selection_mode);
+    setAdminModal({
+      type: "poll",
+      mode: "edit",
+      targetId: pollTemplate.id,
+    });
   }
 
   async function handleSaveAccount() {
@@ -1039,6 +1230,237 @@ export default function HomeScreen() {
     }
   }
 
+  async function resolveLinkedProfileId(email: string) {
+    const normalizedEmail = email.trim().toLowerCase();
+
+    if (!normalizedEmail) {
+      return null;
+    }
+
+    const linkedProfile = await findProfileByEmail(normalizedEmail);
+    return linkedProfile?.id ?? null;
+  }
+
+  function togglePreferredPosition(positionId: string) {
+    setPlayerPreferredPositionIds((currentValue) =>
+      currentValue.includes(positionId)
+        ? currentValue.filter((item) => item !== positionId)
+        : [...currentValue, positionId],
+    );
+  }
+
+  async function handleSavePlayer() {
+    if (!selectedAccess || !overview || !profile) {
+      return;
+    }
+
+    if (!playerNameDraft.trim()) {
+      setMessage({ tone: "error", text: "Informe o nome do jogador." });
+      return;
+    }
+
+    if (overview.priorityGroups.length > 0 && !playerPriorityGroupDraftId) {
+      setMessage({ tone: "error", text: "Selecione o grupo prioritario do jogador." });
+      return;
+    }
+
+    setIsSubmittingModal(true);
+    setMessage(null);
+
+    try {
+      const linkedProfileId = await resolveLinkedProfileId(playerEmailDraft);
+      const isEditing = adminModal?.type === "player" && adminModal.mode === "edit" && adminModal.targetId;
+
+      if (isEditing && adminModal.targetId) {
+        await updateAccountPlayer({
+          playerId: adminModal.targetId,
+          fullName: playerNameDraft.trim(),
+          email: playerEmailDraft.trim() || null,
+          linkedProfileId,
+          priorityGroupId: playerPriorityGroupDraftId,
+          isDefaultForWeeklyList: playerWeeklyDefaultDraft,
+          preferredPositionIds: playerPreferredPositionIds,
+        });
+      } else {
+        await createAccountPlayer({
+          accountId: selectedAccess.account.id,
+          fullName: playerNameDraft.trim(),
+          email: playerEmailDraft.trim() || null,
+          linkedProfileId,
+          priorityGroupId: playerPriorityGroupDraftId,
+          isDefaultForWeeklyList: playerWeeklyDefaultDraft,
+          createdBy: profile.id,
+          preferredPositionIds: playerPreferredPositionIds,
+        });
+      }
+
+      await reloadSelectedWorkspace();
+      setOverview(await getAccountOverview(selectedAccess.account.id));
+      closeAdminModal();
+      resetPlayerForm();
+      setWorkspaceTab("players");
+      setMessage({
+        tone: "success",
+        text:
+          linkedProfileId && playerEmailDraft.trim()
+            ? "Jogador salvo e associado ao login existente."
+            : "Jogador salvo na conta esportiva.",
+      });
+    } catch (saveError) {
+      setMessage({ tone: "error", text: getReadableError(saveError) });
+    } finally {
+      setIsSubmittingModal(false);
+    }
+  }
+
+  async function handleSavePollTemplate() {
+    if (!selectedAccess || !profile) {
+      return;
+    }
+
+    if (!pollTitleDraft.trim()) {
+      setMessage({ tone: "error", text: "Informe o titulo da enquete." });
+      return;
+    }
+
+    setIsSubmittingModal(true);
+    setMessage(null);
+
+    try {
+      const isEditing = adminModal?.type === "poll" && adminModal.mode === "edit" && adminModal.targetId;
+
+      if (isEditing && adminModal.targetId) {
+        await updatePollTemplate({
+          pollTemplateId: adminModal.targetId,
+          title: pollTitleDraft.trim(),
+          description: pollDescriptionDraft.trim() || null,
+          selectionMode: pollSelectionModeDraft,
+        });
+      } else {
+        await createPollTemplate({
+          accountId: selectedAccess.account.id,
+          title: pollTitleDraft.trim(),
+          description: pollDescriptionDraft.trim() || null,
+          selectionMode: pollSelectionModeDraft,
+          createdBy: profile.id,
+        });
+      }
+
+      await reloadSelectedWorkspace();
+      setOverview(await getAccountOverview(selectedAccess.account.id));
+      closeAdminModal();
+      resetPollForm();
+      setWorkspaceTab("polls");
+      setMessage({
+        tone: "success",
+        text: isEditing ? "Enquete atualizada." : "Enquete cadastrada para a conta esportiva.",
+      });
+    } catch (saveError) {
+      setMessage({ tone: "error", text: getReadableError(saveError) });
+    } finally {
+      setIsSubmittingModal(false);
+    }
+  }
+
+  async function handleDeactivatePlayer(item: AccountPlayerAdminItem) {
+    setDeletingItemId(item.player.id);
+    setMessage(null);
+
+    try {
+      await deactivateAccountPlayer(item.player.id);
+      await reloadSelectedWorkspace();
+      if (selectedAccess) {
+        setOverview(await getAccountOverview(selectedAccess.account.id));
+      }
+      setMessage({ tone: "success", text: "Jogador removido da conta esportiva." });
+    } catch (deactivateError) {
+      setMessage({ tone: "error", text: getReadableError(deactivateError) });
+    } finally {
+      setDeletingItemId(null);
+    }
+  }
+
+  function confirmDeactivatePlayer(item: AccountPlayerAdminItem) {
+    Alert.alert(
+      "Remover jogador",
+      `Deseja remover ${item.player.full_name} do cadastro de jogadores da conta?`,
+      [
+        { text: "Cancelar", style: "cancel" },
+        {
+          text: "Remover",
+          style: "destructive",
+          onPress: () => {
+            void handleDeactivatePlayer(item);
+          },
+        },
+      ],
+    );
+  }
+
+  async function handleArchivePollTemplate(pollTemplate: PollTemplate) {
+    setDeletingItemId(pollTemplate.id);
+    setMessage(null);
+
+    try {
+      await archivePollTemplate(pollTemplate.id);
+      await reloadSelectedWorkspace();
+      if (selectedAccess) {
+        setOverview(await getAccountOverview(selectedAccess.account.id));
+      }
+      setMessage({ tone: "success", text: "Enquete removida da conta esportiva." });
+    } catch (archiveError) {
+      setMessage({ tone: "error", text: getReadableError(archiveError) });
+    } finally {
+      setDeletingItemId(null);
+    }
+  }
+
+  function confirmArchivePollTemplate(pollTemplate: PollTemplate) {
+    Alert.alert(
+      "Remover enquete",
+      `Deseja remover a enquete ${pollTemplate.title} da conta esportiva?`,
+      [
+        { text: "Cancelar", style: "cancel" },
+        {
+          text: "Remover",
+          style: "destructive",
+          onPress: () => {
+            void handleArchivePollTemplate(pollTemplate);
+          },
+        },
+      ],
+    );
+  }
+
+  async function handleToggleWeeklyPlayer(item: AccountPlayerAdminItem, nextValue: boolean) {
+    setDeletingItemId(item.player.id);
+    setMessage(null);
+
+    try {
+      await updateAccountPlayer({
+        playerId: item.player.id,
+        fullName: item.player.full_name,
+        email: item.player.email,
+        linkedProfileId: item.player.linked_profile_id,
+        priorityGroupId: item.player.priority_group_id,
+        isDefaultForWeeklyList: nextValue,
+        preferredPositionIds: item.preferredPositions.map((position) => position.id),
+      });
+
+      await reloadSelectedWorkspace();
+      setMessage({
+        tone: "success",
+        text: nextValue
+          ? "Jogador entrou na lista base semanal."
+          : "Jogador saiu da lista base semanal.",
+      });
+    } catch (toggleError) {
+      setMessage({ tone: "error", text: getReadableError(toggleError) });
+    } finally {
+      setDeletingItemId(null);
+    }
+  }
+
   async function handleDeactivateMembership(item: AccountMembershipAdminItem) {
     setDeletingItemId(item.membership.id);
     setMessage(null);
@@ -1099,7 +1521,7 @@ export default function HomeScreen() {
             onPress={() => setAdminTab("memberships")}
             style={[styles.tabButton, adminTab === "memberships" && styles.tabButtonActive]}>
             <Text style={[styles.tabText, adminTab === "memberships" && styles.tabTextActive]}>
-              Usuarios
+              Acessos
             </Text>
           </Pressable>
         </View>
@@ -1138,7 +1560,7 @@ export default function HomeScreen() {
                       <Pressable
                         onPress={() => setSelectedAccountId(account.id)}
                         style={styles.inlineActionButton}>
-                        <Text style={styles.inlineActionText}>Abrir</Text>
+                        <Text style={styles.inlineActionText}>Gerenciar</Text>
                       </Pressable>
                       <Pressable
                         onPress={() => void openEditAccountModal(account.id)}
@@ -1213,7 +1635,7 @@ export default function HomeScreen() {
               <View style={styles.inlineHeaderContent}>
                 <Text style={styles.panelTitle}>Usuarios e vinculos</Text>
                 <Text style={styles.panelText}>
-                  Gerencie os usuarios ja cadastrados e seus papeis em cada conta esportiva.
+                  Gerencie os usuarios que conseguem entrar no BoraJogar e seus papeis em cada conta esportiva.
                 </Text>
               </View>
               <Pressable onPress={() => void openCreateMembershipModal()} style={styles.secondaryButton}>
@@ -1270,17 +1692,27 @@ export default function HomeScreen() {
 
     const isModalityModal = adminModal.type === "modality";
     const isMembershipModal = adminModal.type === "membership";
+    const isPlayerModal = adminModal.type === "player";
+    const isPollModal = adminModal.type === "poll";
     const title =
       adminModal.mode === "create"
         ? isModalityModal
           ? "Nova modalidade esportiva"
           : isMembershipModal
             ? "Novo vinculo de usuario"
+            : isPlayerModal
+              ? "Novo jogador da conta"
+              : isPollModal
+                ? "Nova enquete da conta"
             : "Nova conta esportiva"
         : isModalityModal
           ? "Editar modalidade esportiva"
           : isMembershipModal
             ? "Editar vinculo de usuario"
+            : isPlayerModal
+              ? "Editar jogador da conta"
+              : isPollModal
+                ? "Editar enquete da conta"
             : "Editar conta esportiva";
 
     return (
@@ -1442,6 +1874,191 @@ export default function HomeScreen() {
                       ) : (
                         <Text style={styles.primaryButtonText}>
                           {adminModal.mode === "create" ? "Criar vinculo" : "Salvar vinculo"}
+                        </Text>
+                      )}
+                    </Pressable>
+                  </>
+                ) : isPlayerModal ? (
+                  <>
+                    <View style={styles.formSection}>
+                      <Text style={styles.formSectionTitle}>Cadastro do jogador</Text>
+                      <Text style={styles.fieldHint}>
+                        O jogador pode existir sem login. Se o email informado ja tiver perfil no BoraJogar, o app associa o login automaticamente.
+                      </Text>
+
+                      <View style={styles.fieldBlock}>
+                        <Text style={styles.label}>Nome do jogador</Text>
+                        <TextInput
+                          value={playerNameDraft}
+                          onChangeText={setPlayerNameDraft}
+                          placeholder="Nome completo"
+                          placeholderTextColor={Colors.textMuted}
+                          style={styles.input}
+                        />
+                      </View>
+
+                      <View style={styles.fieldBlock}>
+                        <Text style={styles.label}>Email do jogador (opcional)</Text>
+                        <Text style={styles.fieldHint}>
+                          Se esse email ja existir como usuario do BoraJogar, o login sera vinculado ao jogador.
+                        </Text>
+                        <TextInput
+                          value={playerEmailDraft}
+                          onChangeText={setPlayerEmailDraft}
+                          placeholder="email@exemplo.com"
+                          placeholderTextColor={Colors.textMuted}
+                          autoCapitalize="none"
+                          keyboardType="email-address"
+                          style={styles.input}
+                        />
+                      </View>
+                    </View>
+
+                    <View style={styles.formSection}>
+                      <Text style={styles.formSectionTitle}>Prioridade e posicoes</Text>
+
+                      <View style={styles.fieldBlock}>
+                        <Text style={styles.label}>Grupo prioritario</Text>
+                        <View style={styles.chips}>
+                          {overview?.priorityGroups.map((group) => (
+                            <Pressable
+                              key={group.id}
+                              onPress={() => setPlayerPriorityGroupDraftId(group.id)}
+                              style={[
+                                styles.chip,
+                                playerPriorityGroupDraftId === group.id && styles.chipSelected,
+                              ]}>
+                              <Text
+                                style={[
+                                  styles.chipText,
+                                  playerPriorityGroupDraftId === group.id && styles.chipTextSelected,
+                                ]}>
+                                {group.priority_rank}. {group.name}
+                              </Text>
+                            </Pressable>
+                          ))}
+                        </View>
+                      </View>
+
+                      <View style={styles.fieldBlock}>
+                        <Text style={styles.label}>Posicoes favoritas</Text>
+                        <Text style={styles.fieldHint}>
+                          Toque para montar a ordem de preferencia. O primeiro chip selecionado vira a posicao favorita principal.
+                        </Text>
+                        <View style={styles.chips}>
+                          {modalityPositions.map((position) => {
+                            const selectedIndex = playerPreferredPositionIds.indexOf(position.id);
+                            const isSelected = selectedIndex >= 0;
+
+                            return (
+                              <Pressable
+                                key={position.id}
+                                onPress={() => togglePreferredPosition(position.id)}
+                                style={[styles.chip, isSelected && styles.chipSelected]}>
+                                <Text style={[styles.chipText, isSelected && styles.chipTextSelected]}>
+                                  {isSelected ? `${selectedIndex + 1}. ` : ""}
+                                  {position.name}
+                                </Text>
+                              </Pressable>
+                            );
+                          })}
+                        </View>
+                      </View>
+                    </View>
+
+                    <View style={styles.formSection}>
+                      <Text style={styles.formSectionTitle}>Lista base semanal</Text>
+                      <Text style={styles.fieldHint}>
+                        Define se esse jogador entra por padrao na lista base da semana antes da montagem do evento.
+                      </Text>
+                      <View style={styles.chips}>
+                        <Pressable
+                          onPress={() => setPlayerWeeklyDefaultDraft(true)}
+                          style={[styles.chip, playerWeeklyDefaultDraft && styles.chipSelected]}>
+                          <Text style={[styles.chipText, playerWeeklyDefaultDraft && styles.chipTextSelected]}>
+                            Entrar na lista
+                          </Text>
+                        </Pressable>
+                        <Pressable
+                          onPress={() => setPlayerWeeklyDefaultDraft(false)}
+                          style={[styles.chip, !playerWeeklyDefaultDraft && styles.chipSelected]}>
+                          <Text style={[styles.chipText, !playerWeeklyDefaultDraft && styles.chipTextSelected]}>
+                            Fora da lista
+                          </Text>
+                        </Pressable>
+                      </View>
+                    </View>
+
+                    <Pressable
+                      onPress={() => void handleSavePlayer()}
+                      disabled={isSubmittingModal}
+                      style={[styles.primaryButton, isSubmittingModal && styles.buttonDisabled]}>
+                      {isSubmittingModal ? (
+                        <ActivityIndicator color="#ffffff" />
+                      ) : (
+                        <Text style={styles.primaryButtonText}>
+                          {adminModal.mode === "create" ? "Cadastrar jogador" : "Salvar jogador"}
+                        </Text>
+                      )}
+                    </Pressable>
+                  </>
+                ) : isPollModal ? (
+                  <>
+                    <View style={styles.formSection}>
+                      <Text style={styles.formSectionTitle}>Modelo de enquete da conta</Text>
+                      <Text style={styles.fieldHint}>
+                        Essas enquetes ficam disponiveis para reutilizar em cada evento da conta esportiva.
+                      </Text>
+
+                      <View style={styles.fieldBlock}>
+                        <Text style={styles.label}>Titulo da enquete</Text>
+                        <TextInput
+                          value={pollTitleDraft}
+                          onChangeText={setPollTitleDraft}
+                          placeholder="Melhor jogador da rodada"
+                          placeholderTextColor={Colors.textMuted}
+                          style={styles.input}
+                        />
+                      </View>
+
+                      <View style={styles.fieldBlock}>
+                        <Text style={styles.label}>Descricao</Text>
+                        <TextInput
+                          value={pollDescriptionDraft}
+                          onChangeText={setPollDescriptionDraft}
+                          placeholder="Explique o objetivo da votacao"
+                          placeholderTextColor={Colors.textMuted}
+                          style={[styles.input, styles.multiline]}
+                          multiline
+                        />
+                      </View>
+
+                      <View style={styles.fieldBlock}>
+                        <Text style={styles.label}>Como a enquete escolhe o jogador</Text>
+                        {pollModeOptions.map((option) => (
+                          <Pressable
+                            key={option.value}
+                            onPress={() => setPollSelectionModeDraft(option.value)}
+                            style={[
+                              styles.selectionCard,
+                              pollSelectionModeDraft === option.value && styles.selectionCardActive,
+                            ]}>
+                            <Text style={styles.selectionCardTitle}>{option.label}</Text>
+                            <Text style={styles.selectionCardText}>{option.description}</Text>
+                          </Pressable>
+                        ))}
+                      </View>
+                    </View>
+
+                    <Pressable
+                      onPress={() => void handleSavePollTemplate()}
+                      disabled={isSubmittingModal}
+                      style={[styles.primaryButton, isSubmittingModal && styles.buttonDisabled]}>
+                      {isSubmittingModal ? (
+                        <ActivityIndicator color="#ffffff" />
+                      ) : (
+                        <Text style={styles.primaryButtonText}>
+                          {adminModal.mode === "create" ? "Cadastrar enquete" : "Salvar enquete"}
                         </Text>
                       )}
                     </Pressable>
@@ -1690,6 +2307,214 @@ export default function HomeScreen() {
     );
   }
 
+  function renderAccountWorkspace() {
+    if (!selectedAccess || !overview || !canManageAccount) {
+      return null;
+    }
+
+    return (
+      <View style={styles.panel}>
+        <View style={styles.inlineHeader}>
+          <View style={styles.inlineHeaderContent}>
+            <Text style={styles.panelTitle}>Gestao da conta esportiva</Text>
+            <Text style={styles.panelText}>
+              Edicao da conta fica separada. Aqui voce administra jogadores, enquetes e a lista base da semana.
+            </Text>
+          </View>
+          <Pressable onPress={() => void openEditAccountModal(selectedAccess.account.id)} style={styles.secondaryButton}>
+            <Text style={styles.secondaryButtonText}>Editar conta</Text>
+          </Pressable>
+        </View>
+
+        <View style={styles.tabRow}>
+          <Pressable
+            onPress={() => setWorkspaceTab("players")}
+            style={[styles.tabButton, workspaceTab === "players" && styles.tabButtonActive]}>
+            <Text style={[styles.tabText, workspaceTab === "players" && styles.tabTextActive]}>
+              Jogadores
+            </Text>
+          </Pressable>
+          <Pressable
+            onPress={() => setWorkspaceTab("polls")}
+            style={[styles.tabButton, workspaceTab === "polls" && styles.tabButtonActive]}>
+            <Text style={[styles.tabText, workspaceTab === "polls" && styles.tabTextActive]}>
+              Enquetes
+            </Text>
+          </Pressable>
+          <Pressable
+            onPress={() => setWorkspaceTab("weekly")}
+            style={[styles.tabButton, workspaceTab === "weekly" && styles.tabButtonActive]}>
+            <Text style={[styles.tabText, workspaceTab === "weekly" && styles.tabTextActive]}>
+              Lista semanal
+            </Text>
+          </Pressable>
+        </View>
+
+        {isWorkspaceLoading ? (
+          <View style={styles.workspaceLoading}>
+            <ActivityIndicator color={Colors.tint} />
+            <Text style={styles.panelText}>Carregando gestao da conta...</Text>
+          </View>
+        ) : workspaceTab === "players" ? (
+          <>
+            <View style={styles.inlineHeader}>
+              <View style={styles.inlineHeaderContent}>
+                <Text style={styles.workspaceTitle}>Jogadores elegiveis</Text>
+                <Text style={styles.panelText}>
+                  Cadastre todos os jogadores da conta, com ou sem login no BoraJogar.
+                </Text>
+              </View>
+              <Pressable onPress={openCreatePlayerModal} style={styles.secondaryButton}>
+                <Text style={styles.secondaryButtonText}>Novo jogador</Text>
+              </Pressable>
+            </View>
+
+            {accountPlayers.length > 0 ? (
+              accountPlayers.map((item) => (
+                <View key={item.player.id} style={styles.listCard}>
+                  <View style={styles.listCardHeader}>
+                    <View style={styles.flex}>
+                      <Text style={styles.panelTitle}>{item.player.full_name}</Text>
+                      <Text style={styles.panelText}>
+                        {item.player.email ?? "Sem email"} |{" "}
+                        {item.linkedProfile ? "Login vinculado" : "Sem login vinculado"}
+                      </Text>
+                      <Text style={styles.panelText}>
+                        Prioridade: {item.priorityGroup?.name ?? "Nao definida"}
+                      </Text>
+                      <Text style={styles.panelText}>
+                        Posicoes:{" "}
+                        {item.preferredPositions.length > 0
+                          ? item.preferredPositions.map((position) => position.name).join(", ")
+                          : "Nao informadas"}
+                      </Text>
+                      <Text style={styles.panelText}>
+                        Lista semanal: {item.player.is_default_for_weekly_list ? "Entra por padrao" : "Fora da base"}
+                      </Text>
+                    </View>
+                    <View style={styles.listActions}>
+                      <Pressable onPress={() => openEditPlayerModal(item)} style={styles.inlineActionButton}>
+                        <Text style={styles.inlineActionText}>Editar</Text>
+                      </Pressable>
+                      <Pressable
+                        onPress={() => confirmDeactivatePlayer(item)}
+                        disabled={deletingItemId === item.player.id}
+                        style={[styles.inlineDangerButton, deletingItemId === item.player.id && styles.buttonDisabled]}>
+                        <Text style={styles.inlineDangerText}>
+                          {deletingItemId === item.player.id ? "Removendo..." : "Remover"}
+                        </Text>
+                      </Pressable>
+                    </View>
+                  </View>
+                </View>
+              ))
+            ) : (
+              <Text style={styles.panelText}>
+                Nenhum jogador cadastrado ainda. Use esse cadastro mesmo quando a pessoa nao tiver login.
+              </Text>
+            )}
+          </>
+        ) : workspaceTab === "polls" ? (
+          <>
+            <View style={styles.inlineHeader}>
+              <View style={styles.inlineHeaderContent}>
+                <Text style={styles.workspaceTitle}>Enquetes da conta</Text>
+                <Text style={styles.panelText}>
+                  Modele as enquetes recorrentes para reutilizar quando os eventos reais entrarem no fluxo.
+                </Text>
+              </View>
+              <Pressable onPress={openCreatePollModal} style={styles.secondaryButton}>
+                <Text style={styles.secondaryButtonText}>Nova enquete</Text>
+              </Pressable>
+            </View>
+
+            {accountPollTemplates.length > 0 ? (
+              accountPollTemplates.map((pollTemplate) => (
+                <View key={pollTemplate.id} style={styles.listCard}>
+                  <View style={styles.listCardHeader}>
+                    <View style={styles.flex}>
+                      <Text style={styles.panelTitle}>{pollTemplate.title}</Text>
+                      <Text style={styles.panelText}>
+                        {pollTemplate.selection_mode === "event_participant"
+                          ? "Permite escolher qualquer jogador do evento"
+                          : "Usa opcoes fechadas cadastradas no evento"}
+                      </Text>
+                      {pollTemplate.description ? (
+                        <Text style={styles.panelText}>{pollTemplate.description}</Text>
+                      ) : null}
+                    </View>
+                    <View style={styles.listActions}>
+                      <Pressable
+                        onPress={() => openEditPollModal(pollTemplate)}
+                        style={styles.inlineActionButton}>
+                        <Text style={styles.inlineActionText}>Editar</Text>
+                      </Pressable>
+                      <Pressable
+                        onPress={() => confirmArchivePollTemplate(pollTemplate)}
+                        disabled={deletingItemId === pollTemplate.id}
+                        style={[
+                          styles.inlineDangerButton,
+                          deletingItemId === pollTemplate.id && styles.buttonDisabled,
+                        ]}>
+                        <Text style={styles.inlineDangerText}>
+                          {deletingItemId === pollTemplate.id ? "Removendo..." : "Remover"}
+                        </Text>
+                      </Pressable>
+                    </View>
+                  </View>
+                </View>
+              ))
+            ) : (
+              <Text style={styles.panelText}>
+                Nenhuma enquete cadastrada ainda para essa conta esportiva.
+              </Text>
+            )}
+          </>
+        ) : (
+          <>
+            <View style={styles.inlineHeader}>
+              <View style={styles.inlineHeaderContent}>
+                <Text style={styles.workspaceTitle}>Lista base da semana</Text>
+                <Text style={styles.panelText}>
+                  Essa lista separa o cadastro de jogadores do quorum semanal. Ela servira de base para os eventos.
+                </Text>
+              </View>
+            </View>
+
+            {accountPlayers.length > 0 ? (
+              accountPlayers.map((item) => (
+                <View key={item.player.id} style={styles.listCard}>
+                  <View style={styles.listCardHeader}>
+                    <View style={styles.flex}>
+                      <Text style={styles.panelTitle}>{item.player.full_name}</Text>
+                      <Text style={styles.panelText}>
+                        {item.priorityGroup ? `${item.priorityGroup.priority_rank}. ${item.priorityGroup.name}` : "Sem prioridade definida"}
+                      </Text>
+                    </View>
+                    <View style={styles.listActions}>
+                      <Pressable
+                        onPress={() => void handleToggleWeeklyPlayer(item, !item.player.is_default_for_weekly_list)}
+                        disabled={deletingItemId === item.player.id}
+                        style={styles.inlineActionButton}>
+                        <Text style={styles.inlineActionText}>
+                          {item.player.is_default_for_weekly_list ? "Tirar da lista" : "Entrar na lista"}
+                        </Text>
+                      </Pressable>
+                    </View>
+                  </View>
+                </View>
+              ))
+            ) : (
+              <Text style={styles.panelText}>
+                Primeiro cadastre os jogadores da conta. Depois use esta aba para compor a lista base semanal.
+              </Text>
+            )}
+          </>
+        )}
+      </View>
+    );
+  }
+
   const canManageAccount = Boolean(
     profile?.is_super_admin || selectedMembership?.membership.role === "group_admin",
   );
@@ -1778,12 +2603,16 @@ export default function HomeScreen() {
                   <Text style={styles.summaryLabel}>Modalidade</Text>
                 </View>
                 <View style={styles.summaryCard}>
-                  <Text style={styles.summaryValue}>{overview.account.max_players_per_event}</Text>
-                  <Text style={styles.summaryLabel}>Limite por evento</Text>
+                  <Text style={styles.summaryValue}>{overview.activePlayerCount}</Text>
+                  <Text style={styles.summaryLabel}>Jogadores cadastrados</Text>
                 </View>
                 <View style={styles.summaryCard}>
                   <Text style={styles.summaryValue}>{overview.activeMemberCount}</Text>
-                  <Text style={styles.summaryLabel}>Membros ativos</Text>
+                  <Text style={styles.summaryLabel}>Acessos com login</Text>
+                </View>
+                <View style={styles.summaryCard}>
+                  <Text style={styles.summaryValue}>{overview.activePollTemplateCount}</Text>
+                  <Text style={styles.summaryLabel}>Enquetes da conta</Text>
                 </View>
               </View>
 
@@ -1798,6 +2627,9 @@ export default function HomeScreen() {
 
               <View style={styles.panel}>
                 <Text style={styles.panelTitle}>Grupos prioritarios</Text>
+                <Text style={styles.panelText}>
+                  Cada conta esportiva define seus proprios grupos. Eles nao sao compartilhados entre contas diferentes.
+                </Text>
                 <View style={styles.chips}>
                   {overview.priorityGroups.map((group) => (
                     <View key={group.id} style={styles.tag}>
@@ -1809,46 +2641,7 @@ export default function HomeScreen() {
                 </View>
               </View>
 
-              {!isSuperAdmin && canManageAccount ? (
-                <View style={styles.panel}>
-                  <Text style={styles.panelTitle}>Editar conta esportiva</Text>
-                  <TextInput
-                    value={accountNameDraft}
-                    onChangeText={setAccountNameDraft}
-                    style={styles.input}
-                  />
-                  <View style={styles.row}>
-                    <TextInput
-                      value={maxPlayersDraft}
-                      onChangeText={setMaxPlayersDraft}
-                      keyboardType="number-pad"
-                      style={[styles.input, styles.flex]}
-                    />
-                    <TextInput
-                      value={openHoursDraft}
-                      onChangeText={setOpenHoursDraft}
-                      keyboardType="number-pad"
-                      style={[styles.input, styles.flex]}
-                    />
-                    <TextInput
-                      value={closeMinutesDraft}
-                      onChangeText={setCloseMinutesDraft}
-                      keyboardType="number-pad"
-                      style={[styles.input, styles.flex]}
-                    />
-                  </View>
-                  <Pressable
-                    onPress={() => void handleSaveAccount()}
-                    disabled={isSavingAccount}
-                    style={[styles.primaryButton, isSavingAccount && styles.buttonDisabled]}>
-                    {isSavingAccount ? (
-                      <ActivityIndicator color="#ffffff" />
-                    ) : (
-                      <Text style={styles.primaryButtonText}>Salvar configuracao</Text>
-                    )}
-                  </Pressable>
-                </View>
-              ) : null}
+              {renderAccountWorkspace()}
             </>
           ) : null}
         </View>
@@ -1941,6 +2734,13 @@ const styles = StyleSheet.create({
   panelSelected: { borderColor: Colors.tint, backgroundColor: "#f3f9ef" },
   panelTitle: { color: Colors.text, fontSize: 16, fontWeight: "800" },
   panelText: { color: Colors.textMuted, fontSize: 14, lineHeight: 21 },
+  workspaceTitle: { color: Colors.text, fontSize: 15, fontWeight: "800" },
+  workspaceLoading: {
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 12,
+    paddingVertical: 28,
+  },
   inlineHeader: {
     flexDirection: "row",
     alignItems: "center",
@@ -2020,6 +2820,20 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   formSectionTitle: { color: Colors.text, fontSize: 16, fontWeight: "800" },
+  selectionCard: {
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    backgroundColor: Colors.background,
+    padding: 14,
+    gap: 6,
+  },
+  selectionCardActive: {
+    borderColor: Colors.tint,
+    backgroundColor: "#f3f9ef",
+  },
+  selectionCardTitle: { color: Colors.text, fontSize: 13, fontWeight: "800" },
+  selectionCardText: { color: Colors.textMuted, fontSize: 12, lineHeight: 18 },
   chips: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   chip: {
     borderRadius: 999,
