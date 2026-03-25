@@ -145,7 +145,8 @@ export type Event = {
 export type EventParticipant = {
   id: string;
   event_id: string;
-  membership_id: string;
+  membership_id: string | null;
+  account_player_id: string | null;
   priority_group_id: string | null;
   priority_rank_snapshot: number;
   roster_order: number;

@@ -21,21 +21,30 @@ import {
   archivePollTemplate,
   type AccountMembershipAdminItem,
   type AccountPlayerAdminItem,
+  addPlayerToWeeklyEvent,
+  closeWeeklyEventList,
+  completeWeeklyEvent,
   createAccountPlayer,
+  createEventPollsFromTemplates,
   createSportModality,
   createSportsAccount,
+  createWeeklyEventCall,
   createPollTemplate,
   deleteSportModality,
   deleteSportsAccount,
   ensurePlayerLoginAccess,
   findProfileByEmail,
+  getCurrentWeeklyEvent,
   listAllAccountMemberships,
   listAccountPlayers,
   listAccountPollTemplates,
+  listEventPolls,
   getAccountOverview,
+  listWeeklyEventParticipants,
   listModalityPositions,
   listAllSportsAccounts,
   listSportModalities,
+  removePlayerFromWeeklyEvent,
   updateSportModality,
   updateAccountPlayer,
   updatePollTemplate,
@@ -44,6 +53,7 @@ import {
   upsertAccountMembership,
   updateSportsAccountBasics,
   type AccountOverview,
+  type WeeklyEventParticipantItem,
 } from "@/src/lib/accounts";
 import {
   deleteManagedPlayerPhoto,
@@ -56,6 +66,8 @@ import {
 import { useAuth } from "@/src/providers/auth-provider";
 import type {
   AccountRole,
+  Event,
+  EventPoll,
   ModalityPosition,
   PollSelectionMode,
   PollTemplate,
@@ -248,6 +260,11 @@ export default function HomeScreen() {
   const [accountPlayers, setAccountPlayers] = useState<AccountPlayerAdminItem[]>([]);
   const [accountPollTemplates, setAccountPollTemplates] = useState<PollTemplate[]>([]);
   const [modalityPositions, setModalityPositions] = useState<ModalityPosition[]>([]);
+  const [weeklyEvent, setWeeklyEvent] = useState<Event | null>(null);
+  const [weeklyParticipants, setWeeklyParticipants] = useState<WeeklyEventParticipantItem[]>([]);
+  const [weeklyEventPolls, setWeeklyEventPolls] = useState<EventPoll[]>([]);
+  const [weeklyPriorityFilter, setWeeklyPriorityFilter] = useState<string>("all");
+  const [weeklyActionId, setWeeklyActionId] = useState<string | null>(null);
   const [isWorkspaceLoading, setIsWorkspaceLoading] = useState(false);
   const [isAdminLoading, setIsAdminLoading] = useState(false);
   const [isSavingAccount, setIsSavingAccount] = useState(false);
@@ -496,6 +513,9 @@ export default function HomeScreen() {
         setAccountPlayers([]);
         setAccountPollTemplates([]);
         setModalityPositions([]);
+        setWeeklyEvent(null);
+        setWeeklyParticipants([]);
+        setWeeklyEventPolls([]);
         setIsWorkspaceLoading(false);
         return;
       }
@@ -503,11 +523,12 @@ export default function HomeScreen() {
       setIsWorkspaceLoading(true);
 
       try {
-        const [nextPlayers, nextPollTemplates, nextPositions] = await withTimeout(
+        const [nextPlayers, nextPollTemplates, nextPositions, nextWeeklyData] = await withTimeout(
           Promise.all([
             listAccountPlayers(selectedAccessAccountId, selectedOverviewModalityId),
             listAccountPollTemplates(selectedAccessAccountId),
             listModalityPositions(selectedOverviewModalityId),
+            loadWeeklyWorkspaceData(selectedAccessAccountId, selectedOverviewModalityId),
           ]),
           8000,
           "O carregamento da gestao da conta",
@@ -520,6 +541,9 @@ export default function HomeScreen() {
         setAccountPlayers(nextPlayers);
         setAccountPollTemplates(nextPollTemplates);
         setModalityPositions(nextPositions);
+        setWeeklyEvent(nextWeeklyData.nextWeeklyEvent);
+        setWeeklyParticipants(nextWeeklyData.nextWeeklyParticipants);
+        setWeeklyEventPolls(nextWeeklyData.nextWeeklyEventPolls);
       } catch (loadError) {
         if (isActive) {
           setMessage({ tone: "error", text: getReadableError(loadError) });
@@ -619,6 +643,29 @@ export default function HomeScreen() {
     }
   }, [membershipRoleModalDraft]);
 
+  async function loadWeeklyWorkspaceData(accountId: string, modalityId: string) {
+    const nextWeeklyEvent = await getCurrentWeeklyEvent(accountId);
+
+    if (!nextWeeklyEvent) {
+      return {
+        nextWeeklyEvent: null,
+        nextWeeklyParticipants: [] as WeeklyEventParticipantItem[],
+        nextWeeklyEventPolls: [] as EventPoll[],
+      };
+    }
+
+    const [nextWeeklyParticipants, nextWeeklyEventPolls] = await Promise.all([
+      listWeeklyEventParticipants(nextWeeklyEvent.id, modalityId),
+      listEventPolls(nextWeeklyEvent.id),
+    ]);
+
+    return {
+      nextWeeklyEvent,
+      nextWeeklyParticipants,
+      nextWeeklyEventPolls,
+    };
+  }
+
   async function reloadAccounts() {
     if (!profile?.is_super_admin) {
       return;
@@ -660,18 +707,25 @@ export default function HomeScreen() {
       setAccountPlayers([]);
       setAccountPollTemplates([]);
       setModalityPositions([]);
+      setWeeklyEvent(null);
+      setWeeklyParticipants([]);
+      setWeeklyEventPolls([]);
       return;
     }
 
-    const [nextPlayers, nextPollTemplates, nextPositions] = await Promise.all([
+    const [nextPlayers, nextPollTemplates, nextPositions, nextWeeklyData] = await Promise.all([
       listAccountPlayers(selectedAccess.account.id, overview.account.modality_id),
       listAccountPollTemplates(selectedAccess.account.id),
       listModalityPositions(overview.account.modality_id),
+      loadWeeklyWorkspaceData(selectedAccess.account.id, overview.account.modality_id),
     ]);
 
     setAccountPlayers(nextPlayers);
     setAccountPollTemplates(nextPollTemplates);
     setModalityPositions(nextPositions);
+    setWeeklyEvent(nextWeeklyData.nextWeeklyEvent);
+    setWeeklyParticipants(nextWeeklyData.nextWeeklyParticipants);
+    setWeeklyEventPolls(nextWeeklyData.nextWeeklyEventPolls);
   }
 
   function resetModalityForm() {
@@ -1894,6 +1948,176 @@ export default function HomeScreen() {
     }
   }
 
+  async function handleCreateWeeklyCall() {
+    if (!selectedAccess || !overview || !profile) {
+      return;
+    }
+
+    const nextSchedule = overview.schedules[0];
+
+    if (!nextSchedule) {
+      setMessage({ tone: "error", text: "Configure um horario semanal antes de abrir a chamada." });
+      return;
+    }
+
+    setWeeklyActionId("create");
+    setMessage(null);
+
+    try {
+      await createWeeklyEventCall({
+        account: overview.account,
+        schedule: nextSchedule,
+        priorityGroups: overview.priorityGroups,
+        createdBy: profile.id,
+      });
+
+      await reloadSelectedWorkspace();
+      setWorkspaceTab("weekly");
+      setMessage({ tone: "success", text: "Chamada para jogo criada com sucesso." });
+    } catch (actionError) {
+      setMessage({ tone: "error", text: getReadableError(actionError) });
+    } finally {
+      setWeeklyActionId(null);
+    }
+  }
+
+  async function handleAddPlayerToWeeklyList(item: AccountPlayerAdminItem) {
+    if (!weeklyEvent || !profile) {
+      return;
+    }
+
+    setWeeklyActionId(item.player.id);
+    setMessage(null);
+
+    try {
+      await addPlayerToWeeklyEvent({
+        eventId: weeklyEvent.id,
+        playerId: item.player.id,
+        addedBy: profile.id,
+      });
+
+      await reloadSelectedWorkspace();
+      setMessage({ tone: "success", text: `${item.player.full_name} entrou na chamada.` });
+    } catch (actionError) {
+      setMessage({ tone: "error", text: getReadableError(actionError) });
+    } finally {
+      setWeeklyActionId(null);
+    }
+  }
+
+  async function handleRemovePlayerFromWeeklyList(item: WeeklyEventParticipantItem) {
+    setWeeklyActionId(item.participant.id);
+    setMessage(null);
+
+    try {
+      await removePlayerFromWeeklyEvent({
+        eventParticipantId: item.participant.id,
+      });
+
+      await reloadSelectedWorkspace();
+      setMessage({ tone: "success", text: `${item.player.full_name} saiu da chamada.` });
+    } catch (actionError) {
+      setMessage({ tone: "error", text: getReadableError(actionError) });
+    } finally {
+      setWeeklyActionId(null);
+    }
+  }
+
+  async function handleCloseWeeklyList() {
+    if (!weeklyEvent) {
+      return;
+    }
+
+    setWeeklyActionId("close");
+    setMessage(null);
+
+    try {
+      await closeWeeklyEventList(weeklyEvent.id);
+      await reloadSelectedWorkspace();
+      setMessage({ tone: "success", text: "Lista semanal fechada. Ninguem mais pode entrar." });
+    } catch (actionError) {
+      setMessage({ tone: "error", text: getReadableError(actionError) });
+    } finally {
+      setWeeklyActionId(null);
+    }
+  }
+
+  async function handleCreateEventPolls() {
+    if (!selectedAccess || !weeklyEvent || !profile) {
+      return;
+    }
+
+    setWeeklyActionId("polls");
+    setMessage(null);
+
+    try {
+      await createEventPollsFromTemplates({
+        accountId: selectedAccess.account.id,
+        eventId: weeklyEvent.id,
+        createdBy: profile.id,
+      });
+
+      await reloadSelectedWorkspace();
+      setMessage({ tone: "success", text: "Enquetes do evento criadas a partir dos modelos da conta." });
+    } catch (actionError) {
+      setMessage({ tone: "error", text: getReadableError(actionError) });
+    } finally {
+      setWeeklyActionId(null);
+    }
+  }
+
+  async function handleCompleteWeeklyEvent() {
+    if (!weeklyEvent) {
+      return;
+    }
+
+    setWeeklyActionId("complete");
+    setMessage(null);
+
+    try {
+      await completeWeeklyEvent(weeklyEvent.id);
+      await reloadSelectedWorkspace();
+      setMessage({ tone: "success", text: "Evento encerrado e enquetes fechadas." });
+    } catch (actionError) {
+      setMessage({ tone: "error", text: getReadableError(actionError) });
+    } finally {
+      setWeeklyActionId(null);
+    }
+  }
+
+  function confirmCloseWeeklyList() {
+    Alert.alert(
+      "Fechar lista semanal",
+      "Depois de fechar a lista, nao sera mais possivel incluir ou retirar jogadores dessa chamada.",
+      [
+        { text: "Cancelar", style: "cancel" },
+        {
+          text: "Fechar lista",
+          onPress: () => {
+            void handleCloseWeeklyList();
+          },
+        },
+      ],
+    );
+  }
+
+  function confirmCompleteWeeklyEvent() {
+    Alert.alert(
+      "Encerrar evento",
+      "Ao encerrar o evento, as enquetes abertas tambem serao encerradas.",
+      [
+        { text: "Cancelar", style: "cancel" },
+        {
+          text: "Encerrar evento",
+          style: "destructive",
+          onPress: () => {
+            void handleCompleteWeeklyEvent();
+          },
+        },
+      ],
+    );
+  }
+
   async function handleDeactivateMembership(item: AccountMembershipAdminItem) {
     setDeletingItemId(item.membership.id);
     setMessage(null);
@@ -2981,7 +3205,7 @@ export default function HomeScreen() {
           <View style={styles.inlineHeaderContent}>
             <Text style={styles.panelTitle}>Gestao da conta esportiva</Text>
             <Text style={styles.panelText}>
-              Edicao da conta fica separada. Aqui voce administra jogadores, enquetes e a lista base da semana.
+              Edicao da conta fica separada. Aqui voce administra jogadores, enquetes recorrentes e a chamada semanal do jogo.
             </Text>
           </View>
           <Pressable onPress={() => void openEditAccountModal(selectedAccess.account.id)} style={styles.secondaryButton}>
@@ -3137,40 +3361,227 @@ export default function HomeScreen() {
           <>
             <View style={styles.inlineHeader}>
               <View style={styles.inlineHeaderContent}>
-                <Text style={styles.workspaceTitle}>Lista base da semana</Text>
+                <Text style={styles.workspaceTitle}>Chamada da semana</Text>
                 <Text style={styles.panelText}>
-                  Essa lista separa o cadastro de jogadores do quorum semanal. Ela servira de base para os eventos.
+                  Abra a chamada do proximo jogo, monte a lista, feche quando terminar e depois gere as enquetes do evento.
                 </Text>
               </View>
+              {!weeklyEvent ? (
+                <Pressable
+                  onPress={() => void handleCreateWeeklyCall()}
+                  disabled={weeklyActionId === "create"}
+                  style={[styles.secondaryButton, weeklyActionId === "create" && styles.buttonDisabled]}>
+                  <Text style={styles.secondaryButtonText}>
+                    {weeklyActionId === "create" ? "Criando..." : "Criar chamada para jogo"}
+                  </Text>
+                </Pressable>
+              ) : null}
             </View>
 
-            {accountPlayers.length > 0 ? (
-              accountPlayers.map((item) => (
-                <View key={item.player.id} style={styles.listCard}>
-                  <View style={styles.listCardHeader}>
-                    <View style={styles.flex}>
-                      <Text style={styles.panelTitle}>{item.player.full_name}</Text>
+            {!weeklyEvent ? (
+              <Text style={styles.panelText}>
+                Nenhuma chamada semanal aberta. Ao criar, o BoraJogar usa o proximo horario do grupo e ja inclui quem esta marcado para entrar sempre.
+              </Text>
+            ) : (
+              <>
+                <View style={styles.listCard}>
+                  <Text style={styles.panelTitle}>{weeklyEvent.title}</Text>
+                  <Text style={styles.panelText}>
+                    Jogo:{" "}
+                    {new Date(weeklyEvent.starts_at).toLocaleString("pt-BR", {
+                      dateStyle: "short",
+                      timeStyle: "short",
+                    })}{" "}
+                    ate{" "}
+                    {new Date(weeklyEvent.ends_at).toLocaleTimeString("pt-BR", {
+                      hour: "2-digit",
+                      minute: "2-digit",
+                    })}
+                  </Text>
+                  <Text style={styles.panelText}>
+                    Status: {weeklyEvent.status === "draft" ? "Lista aberta" : "Lista fechada"}
+                  </Text>
+                  <Text style={styles.panelText}>
+                    Na lista: {activeWeeklyParticipants.length} / {overview.account.max_players_per_event}
+                  </Text>
+                  <Text style={styles.panelText}>
+                    Enquetes do evento: {weeklyEventPolls.length}
+                  </Text>
+                </View>
+
+                {weeklyEvent.status === "draft" ? (
+                  <View style={styles.inlineHeader}>
+                    <View style={styles.inlineHeaderContent}>
+                      <Text style={styles.workspaceTitle}>Lista em montagem</Text>
                       <Text style={styles.panelText}>
-                        {item.priorityGroup ? `${item.priorityGroup.priority_rank}. ${item.priorityGroup.name}` : "Sem prioridade definida"}
+                        Enquanto a lista estiver aberta, voce pode incluir ou retirar jogadores mantendo a ordem de prioridade.
+                      </Text>
+                    </View>
+                    <Pressable
+                      onPress={confirmCloseWeeklyList}
+                      disabled={weeklyActionId === "close"}
+                      style={[styles.secondaryButton, weeklyActionId === "close" && styles.buttonDisabled]}>
+                      <Text style={styles.secondaryButtonText}>
+                        {weeklyActionId === "close" ? "Fechando..." : "Fechar lista"}
+                      </Text>
+                    </Pressable>
+                  </View>
+                ) : (
+                  <View style={styles.inlineHeader}>
+                    <View style={styles.inlineHeaderContent}>
+                      <Text style={styles.workspaceTitle}>Lista fechada</Text>
+                      <Text style={styles.panelText}>
+                        Com a lista fechada, voce pode criar as enquetes do evento e encerrar o jogo quando terminar.
                       </Text>
                     </View>
                     <View style={styles.listActions}>
                       <Pressable
-                        onPress={() => void handleToggleWeeklyPlayer(item, !item.player.is_default_for_weekly_list)}
-                        disabled={deletingItemId === item.player.id}
-                        style={styles.inlineActionButton}>
+                        onPress={() => void handleCreateEventPolls()}
+                        disabled={weeklyActionId === "polls" || weeklyEventPolls.length > 0}
+                        style={[
+                          styles.inlineActionButton,
+                          (weeklyActionId === "polls" || weeklyEventPolls.length > 0) && styles.buttonDisabled,
+                        ]}>
                         <Text style={styles.inlineActionText}>
-                          {item.player.is_default_for_weekly_list ? "Tirar da lista" : "Entrar na lista"}
+                          {weeklyEventPolls.length > 0
+                            ? "Enquetes criadas"
+                            : weeklyActionId === "polls"
+                              ? "Criando..."
+                              : "Criar enquetes"}
+                        </Text>
+                      </Pressable>
+                      <Pressable
+                        onPress={confirmCompleteWeeklyEvent}
+                        disabled={weeklyActionId === "complete"}
+                        style={[styles.inlineDangerButton, weeklyActionId === "complete" && styles.buttonDisabled]}>
+                        <Text style={styles.inlineDangerText}>
+                          {weeklyActionId === "complete" ? "Encerrando..." : "Encerrar evento"}
                         </Text>
                       </Pressable>
                     </View>
                   </View>
+                )}
+
+                <View style={styles.weeklyBoard}>
+                  <View style={styles.weeklyColumn}>
+                    <Text style={styles.workspaceTitle}>Na lista</Text>
+                    <Text style={styles.panelText}>
+                      Jogadores confirmados na chamada atual, sempre ordenados pela prioridade da conta.
+                    </Text>
+
+                    {activeWeeklyParticipants.length > 0 ? (
+                      activeWeeklyParticipants.map((item) => (
+                        <View key={item.participant.id} style={styles.listCard}>
+                          <View style={styles.listCardHeader}>
+                            <View style={styles.flex}>
+                              <Text style={styles.panelTitle}>{item.player.full_name}</Text>
+                              <Text style={styles.panelText}>
+                                {item.priorityGroup
+                                  ? `${item.priorityGroup.priority_rank}. ${item.priorityGroup.name}`
+                                  : "Sem prioridade definida"}
+                              </Text>
+                              <Text style={styles.panelText}>
+                                Posicoes:{" "}
+                                {item.preferredPositions.length > 0
+                                  ? item.preferredPositions.map((position) => position.name).join(", ")
+                                  : "Nao informadas"}
+                              </Text>
+                            </View>
+                            {weeklyEvent.status === "draft" ? (
+                              <View style={styles.listActions}>
+                                <Pressable
+                                  onPress={() => void handleRemovePlayerFromWeeklyList(item)}
+                                  disabled={weeklyActionId === item.participant.id}
+                                  style={[
+                                    styles.inlineDangerButton,
+                                    weeklyActionId === item.participant.id && styles.buttonDisabled,
+                                  ]}>
+                                  <Text style={styles.inlineDangerText}>
+                                    {weeklyActionId === item.participant.id ? "Retirando..." : "Retirar"}
+                                  </Text>
+                                </Pressable>
+                              </View>
+                            ) : null}
+                          </View>
+                        </View>
+                      ))
+                    ) : (
+                      <Text style={styles.panelText}>
+                        Nenhum jogador entrou na lista ainda.
+                      </Text>
+                    )}
+                  </View>
+
+                  <View style={styles.weeklyColumn}>
+                    <Text style={styles.workspaceTitle}>Fora da lista</Text>
+                    <Text style={styles.panelText}>
+                      Jogadores elegiveis que ainda nao entraram nesta chamada.
+                    </Text>
+
+                    <View style={styles.chips}>
+                      <Pressable
+                        onPress={() => setWeeklyPriorityFilter("all")}
+                        style={[styles.chip, weeklyPriorityFilter === "all" && styles.chipSelected]}>
+                        <Text style={[styles.chipText, weeklyPriorityFilter === "all" && styles.chipTextSelected]}>
+                          Todos
+                        </Text>
+                      </Pressable>
+                      {overview.priorityGroups.map((group) => (
+                        <Pressable
+                          key={group.id}
+                          onPress={() => setWeeklyPriorityFilter(group.id)}
+                          style={[styles.chip, weeklyPriorityFilter === group.id && styles.chipSelected]}>
+                          <Text
+                            style={[
+                              styles.chipText,
+                              weeklyPriorityFilter === group.id && styles.chipTextSelected,
+                            ]}>
+                            {group.priority_rank}. {group.name}
+                          </Text>
+                        </Pressable>
+                      ))}
+                    </View>
+
+                    {availableWeeklyPlayers.length > 0 ? (
+                      availableWeeklyPlayers.map((item) => (
+                        <View key={item.player.id} style={styles.listCard}>
+                          <View style={styles.listCardHeader}>
+                            <View style={styles.flex}>
+                              <Text style={styles.panelTitle}>{item.player.full_name}</Text>
+                              <Text style={styles.panelText}>
+                                {item.priorityGroup
+                                  ? `${item.priorityGroup.priority_rank}. ${item.priorityGroup.name}`
+                                  : "Sem prioridade definida"}
+                              </Text>
+                            </View>
+                            {weeklyEvent.status === "draft" ? (
+                              <View style={styles.listActions}>
+                                <Pressable
+                                  onPress={() => void handleAddPlayerToWeeklyList(item)}
+                                  disabled={weeklyActionId === item.player.id}
+                                  style={[
+                                    styles.inlineActionButton,
+                                    weeklyActionId === item.player.id && styles.buttonDisabled,
+                                  ]}>
+                                  <Text style={styles.inlineActionText}>
+                                    {weeklyActionId === item.player.id ? "Entrando..." : "Incluir"}
+                                  </Text>
+                                </Pressable>
+                              </View>
+                            ) : null}
+                          </View>
+                        </View>
+                      ))
+                    ) : (
+                      <Text style={styles.panelText}>
+                        {accountPlayers.length === 0
+                          ? "Primeiro cadastre os jogadores da conta."
+                          : "Nenhum jogador fora da lista para esse filtro."}
+                      </Text>
+                    )}
+                  </View>
                 </View>
-              ))
-            ) : (
-              <Text style={styles.panelText}>
-                Primeiro cadastre os jogadores da conta. Depois use esta aba para compor a lista base semanal.
-              </Text>
+              </>
             )}
           </>
         )}
@@ -3181,6 +3592,37 @@ export default function HomeScreen() {
   const canManageAccount = Boolean(
     profile?.is_super_admin || selectedMembership?.membership.role === "group_admin",
   );
+
+  const activeWeeklyParticipants = weeklyParticipants
+    .filter((item) => item.participant.selection_status === "active")
+    .sort((first, second) => {
+      if (first.participant.priority_rank_snapshot !== second.participant.priority_rank_snapshot) {
+        return first.participant.priority_rank_snapshot - second.participant.priority_rank_snapshot;
+      }
+
+      if (first.participant.roster_order !== second.participant.roster_order) {
+        return first.participant.roster_order - second.participant.roster_order;
+      }
+
+      return first.player.full_name.localeCompare(second.player.full_name);
+    });
+
+  const activeWeeklyPlayerIds = new Set(activeWeeklyParticipants.map((item) => item.player.id));
+  const availableWeeklyPlayers = accountPlayers
+    .filter((item) => !activeWeeklyPlayerIds.has(item.player.id))
+    .filter((item) =>
+      weeklyPriorityFilter === "all" ? true : item.player.priority_group_id === weeklyPriorityFilter,
+    )
+    .sort((first, second) => {
+      const firstRank = first.priorityGroup?.priority_rank ?? Number.MAX_SAFE_INTEGER;
+      const secondRank = second.priorityGroup?.priority_rank ?? Number.MAX_SAFE_INTEGER;
+
+      if (firstRank !== secondRank) {
+        return firstRank - secondRank;
+      }
+
+      return first.player.full_name.localeCompare(second.player.full_name);
+    });
 
   return (
     <>
@@ -3434,6 +3876,17 @@ const styles = StyleSheet.create({
   listActions: {
     alignItems: "flex-end",
     gap: 8,
+  },
+  weeklyBoard: {
+    gap: 12,
+  },
+  weeklyColumn: {
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    backgroundColor: Colors.surface,
+    padding: 14,
+    gap: 10,
   },
   inlineActionButton: {
     borderRadius: 999,

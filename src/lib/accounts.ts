@@ -6,6 +6,9 @@ import type {
   AccountMembership,
   AccountPriorityGroup,
   AccountSchedule,
+  Event,
+  EventParticipant,
+  EventPoll,
   ModalityPosition,
   PollTemplate,
   Profile,
@@ -49,6 +52,15 @@ export type ProvisionedAuthProfile = {
 
 export type AccountPlayerAdminItem = {
   player: AccountPlayer;
+  linkedProfile: Profile | null;
+  priorityGroup: AccountPriorityGroup | null;
+  preferredPositions: ModalityPosition[];
+};
+
+export type WeeklyEventParticipantItem = {
+  participant: EventParticipant;
+  player: AccountPlayer;
+  membership: AccountMembership | null;
   linkedProfile: Profile | null;
   priorityGroup: AccountPriorityGroup | null;
   preferredPositions: ModalityPosition[];
@@ -180,6 +192,72 @@ function toNormalizedCode(value: string) {
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "")
     .replace(/-{2,}/g, "-");
+}
+
+const eventSelectFields =
+  "id, account_id, schedule_id, title, starts_at, ends_at, confirmation_opens_at, confirmation_closes_at, max_players, status, notes, created_by, published_at, completed_at, created_at, updated_at";
+
+const eventParticipantSelectFields =
+  "id, event_id, membership_id, account_player_id, priority_group_id, priority_rank_snapshot, roster_order, response_status, selection_status, response_at, selection_changed_at, added_by, removed_reason, waitlist_notified_at, created_at, updated_at";
+
+const eventPollSelectFields =
+  "id, event_id, template_id, title, description, selection_mode, status, opens_at, closes_at, sort_order, created_by, created_at, updated_at";
+
+function normalizeClockTime(value: string) {
+  return value.length === 5 ? `${value}:00` : value;
+}
+
+function getPriorityRank(priorityGroupId: string | null, priorityGroups: AccountPriorityGroup[]) {
+  const matchedGroup = priorityGroups.find((group) => group.id === priorityGroupId);
+  return matchedGroup?.priority_rank ?? 999;
+}
+
+function parseTimeParts(value: string) {
+  const [hours, minutes, seconds] = normalizeClockTime(value)
+    .split(":")
+    .map((part) => Number(part));
+
+  return {
+    hours,
+    minutes,
+    seconds: Number.isFinite(seconds) ? seconds : 0,
+  };
+}
+
+function getNextScheduleWindow(schedule: AccountSchedule) {
+  const now = new Date();
+  const { hours: startHours, minutes: startMinutes, seconds: startSeconds } = parseTimeParts(schedule.starts_at);
+  const { hours: endHours, minutes: endMinutes, seconds: endSeconds } = parseTimeParts(schedule.ends_at);
+  const currentWeekday = now.getDay();
+  let daysUntilNext = (schedule.weekday - currentWeekday + 7) % 7;
+
+  const startsAt = new Date(now);
+  startsAt.setHours(startHours, startMinutes, startSeconds, 0);
+  startsAt.setDate(now.getDate() + daysUntilNext);
+
+  const endsAt = new Date(now);
+  endsAt.setHours(endHours, endMinutes, endSeconds, 0);
+  endsAt.setDate(now.getDate() + daysUntilNext);
+
+  if (daysUntilNext === 0 && endsAt <= now) {
+    startsAt.setDate(startsAt.getDate() + 7);
+    endsAt.setDate(endsAt.getDate() + 7);
+  }
+
+  return {
+    startsAt,
+    endsAt,
+  };
+}
+
+function buildEventTitle(accountName: string, startsAt: Date) {
+  const formattedDate = startsAt.toLocaleDateString("pt-BR", {
+    weekday: "long",
+    day: "2-digit",
+    month: "2-digit",
+  });
+
+  return `${accountName} | ${formattedDate}`;
 }
 
 export async function listSportModalities(): Promise<SportModality[]> {
@@ -1030,6 +1108,624 @@ export async function listAccountPlayers(
     priorityGroup: player.priority_group_id ? priorityGroupMap.get(player.priority_group_id) ?? null : null,
     preferredPositions: preferencesByPlayer.get(player.id) ?? [],
   }));
+}
+
+async function listActiveMembershipsForAccount(accountId: string) {
+  const { data, error } = await supabase
+    .from("account_memberships")
+    .select(
+      "id, account_id, profile_id, account_player_id, role, priority_group_id, is_active, joined_at, created_at, updated_at",
+    )
+    .eq("account_id", accountId)
+    .eq("is_active", true);
+
+  throwIfError(error);
+  return (data ?? []) as AccountMembership[];
+}
+
+async function resequenceWeeklyEventParticipants(eventId: string) {
+  const { data: participantData, error: participantError } = await supabase
+    .from("event_participants")
+    .select(eventParticipantSelectFields)
+    .eq("event_id", eventId)
+    .eq("selection_status", "active");
+
+  throwIfError(participantError);
+
+  const participants = (participantData ?? []) as EventParticipant[];
+
+  if (participants.length === 0) {
+    return;
+  }
+
+  const playerIds = [
+    ...new Set(
+      participants
+        .map((participant) => participant.account_player_id)
+        .filter((value): value is string => Boolean(value)),
+    ),
+  ];
+
+  const { data: playerData, error: playerError } = await supabase
+    .from("account_players")
+    .select("id, full_name")
+    .in("id", playerIds);
+
+  throwIfError(playerError);
+
+  const playerNameById = new Map(
+    ((playerData ?? []) as Pick<AccountPlayer, "id" | "full_name">[]).map((player) => [
+      player.id,
+      player.full_name,
+    ]),
+  );
+
+  const sortedParticipants = [...participants].sort((first, second) => {
+    if (first.priority_rank_snapshot !== second.priority_rank_snapshot) {
+      return first.priority_rank_snapshot - second.priority_rank_snapshot;
+    }
+
+    const firstName = playerNameById.get(first.account_player_id ?? "") ?? "";
+    const secondName = playerNameById.get(second.account_player_id ?? "") ?? "";
+    const nameOrder = firstName.localeCompare(secondName);
+
+    if (nameOrder !== 0) {
+      return nameOrder;
+    }
+
+    return first.created_at.localeCompare(second.created_at);
+  });
+
+  for (const [index, participant] of sortedParticipants.entries()) {
+    const nextRosterOrder = index + 1;
+
+    if (participant.roster_order === nextRosterOrder) {
+      continue;
+    }
+
+    const { error: updateError } = await supabase
+      .from("event_participants")
+      .update({
+        roster_order: nextRosterOrder,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", participant.id);
+
+    throwIfError(updateError);
+  }
+}
+
+export async function getCurrentWeeklyEvent(accountId: string): Promise<Event | null> {
+  const { data, error } = await supabase
+    .from("events")
+    .select(eventSelectFields)
+    .eq("account_id", accountId)
+    .in("status", ["draft", "published"])
+    .order("starts_at", { ascending: true })
+    .limit(1)
+    .maybeSingle();
+
+  throwIfError(error);
+  return (data as Event | null) ?? null;
+}
+
+export async function listWeeklyEventParticipants(
+  eventId: string,
+  modalityId: string,
+): Promise<WeeklyEventParticipantItem[]> {
+  const { data: participantData, error: participantError } = await supabase
+    .from("event_participants")
+    .select(eventParticipantSelectFields)
+    .eq("event_id", eventId)
+    .order("priority_rank_snapshot", { ascending: true })
+    .order("roster_order", { ascending: true })
+    .order("created_at", { ascending: true });
+
+  throwIfError(participantError);
+
+  const participants = (participantData ?? []) as EventParticipant[];
+
+  if (participants.length === 0) {
+    return [];
+  }
+
+  const membershipIds = [
+    ...new Set(
+      participants
+        .map((participant) => participant.membership_id)
+        .filter((value): value is string => Boolean(value)),
+    ),
+  ];
+
+  const { data: membershipData, error: membershipError } =
+    membershipIds.length > 0
+      ? await supabase
+          .from("account_memberships")
+          .select(
+            "id, account_id, profile_id, account_player_id, role, priority_group_id, is_active, joined_at, created_at, updated_at",
+          )
+          .in("id", membershipIds)
+      : { data: [] as AccountMembership[], error: null as { message: string } | null };
+
+  throwIfError(membershipError);
+
+  const membershipMap = new Map(
+    ((membershipData ?? []) as AccountMembership[]).map((membership) => [membership.id, membership]),
+  );
+
+  const playerIds = [
+    ...new Set(
+      participants
+        .map((participant) => participant.account_player_id ?? membershipMap.get(participant.membership_id ?? "")?.account_player_id ?? null)
+        .filter((value): value is string => Boolean(value)),
+    ),
+  ];
+
+  const { data: playerData, error: playerError } = await supabase
+    .from("account_players")
+    .select(
+      "id, account_id, linked_profile_id, full_name, email, photo_url, priority_group_id, is_default_for_weekly_list, is_active, created_by, created_at, updated_at",
+    )
+    .in("id", playerIds);
+
+  throwIfError(playerError);
+
+  const players = (playerData ?? []) as AccountPlayer[];
+  const playerMap = new Map(players.map((player) => [player.id, player]));
+
+  const linkedProfileIds = [
+    ...new Set(players.map((player) => player.linked_profile_id).filter((value): value is string => Boolean(value))),
+  ];
+  const priorityGroupIds = [
+    ...new Set(
+      participants
+        .map((participant) => participant.priority_group_id)
+        .concat(players.map((player) => player.priority_group_id))
+        .filter((value): value is string => Boolean(value)),
+    ),
+  ];
+
+  const [
+    { data: profileData, error: profileError },
+    { data: priorityGroupData, error: priorityGroupError },
+    { data: preferenceData, error: preferenceError },
+    { data: positionData, error: positionError },
+  ] = await Promise.all([
+    linkedProfileIds.length > 0
+      ? supabase
+          .from("profiles")
+          .select("id, full_name, email, photo_url, is_super_admin, created_at, updated_at")
+          .in("id", linkedProfileIds)
+      : Promise.resolve({ data: [] as Profile[], error: null as { message: string } | null }),
+    priorityGroupIds.length > 0
+      ? supabase
+          .from("account_priority_groups")
+          .select("id, account_id, name, priority_rank, color_hex, is_active, created_at, updated_at")
+          .in("id", priorityGroupIds)
+      : Promise.resolve({
+          data: [] as AccountPriorityGroup[],
+          error: null as { message: string } | null,
+        }),
+    playerIds.length > 0
+      ? supabase
+          .from("account_player_position_preferences")
+          .select("id, account_player_id, modality_position_id, preference_order, created_at")
+          .in("account_player_id", playerIds)
+          .order("preference_order", { ascending: true })
+      : Promise.resolve({
+          data: [] as AccountPlayerPositionPreference[],
+          error: null as { message: string } | null,
+        }),
+    supabase
+      .from("modality_positions")
+      .select("id, modality_id, name, code, sort_order, created_at, updated_at")
+      .eq("modality_id", modalityId)
+      .order("sort_order", { ascending: true }),
+  ]);
+
+  throwIfError(profileError);
+  throwIfError(priorityGroupError);
+  throwIfError(preferenceError);
+  throwIfError(positionError);
+
+  const profileMap = new Map(((profileData ?? []) as Profile[]).map((profile) => [profile.id, profile]));
+  const priorityGroupMap = new Map(
+    ((priorityGroupData ?? []) as AccountPriorityGroup[]).map((group) => [group.id, group]),
+  );
+  const positionMap = new Map(
+    ((positionData ?? []) as ModalityPosition[]).map((position) => [position.id, position]),
+  );
+  const preferencesByPlayer = new Map<string, ModalityPosition[]>();
+
+  for (const preference of (preferenceData ?? []) as AccountPlayerPositionPreference[]) {
+    const position = positionMap.get(preference.modality_position_id);
+
+    if (!position) {
+      continue;
+    }
+
+    const current = preferencesByPlayer.get(preference.account_player_id) ?? [];
+    current.push(position);
+    preferencesByPlayer.set(preference.account_player_id, current);
+  }
+
+  return participants
+    .map((participant) => {
+      const membership = participant.membership_id
+        ? membershipMap.get(participant.membership_id) ?? null
+        : null;
+      const playerId = participant.account_player_id ?? membership?.account_player_id ?? null;
+      const player = playerId ? playerMap.get(playerId) ?? null : null;
+
+      if (!player) {
+        return null;
+      }
+
+      const priorityGroupId = participant.priority_group_id ?? player.priority_group_id ?? null;
+
+      return {
+        participant,
+        player,
+        membership,
+        linkedProfile: player.linked_profile_id ? profileMap.get(player.linked_profile_id) ?? null : null,
+        priorityGroup: priorityGroupId ? priorityGroupMap.get(priorityGroupId) ?? null : null,
+        preferredPositions: preferencesByPlayer.get(player.id) ?? [],
+      } satisfies WeeklyEventParticipantItem;
+    })
+    .filter((item): item is WeeklyEventParticipantItem => item !== null)
+    .sort((first, second) => {
+      if (first.participant.selection_status !== second.participant.selection_status) {
+        return first.participant.selection_status.localeCompare(second.participant.selection_status);
+      }
+
+      if (first.participant.priority_rank_snapshot !== second.participant.priority_rank_snapshot) {
+        return first.participant.priority_rank_snapshot - second.participant.priority_rank_snapshot;
+      }
+
+      if (first.participant.roster_order !== second.participant.roster_order) {
+        return first.participant.roster_order - second.participant.roster_order;
+      }
+
+      return first.player.full_name.localeCompare(second.player.full_name);
+    });
+}
+
+export async function listEventPolls(eventId: string): Promise<EventPoll[]> {
+  const { data, error } = await supabase
+    .from("event_polls")
+    .select(eventPollSelectFields)
+    .eq("event_id", eventId)
+    .order("sort_order", { ascending: true })
+    .order("created_at", { ascending: true });
+
+  throwIfError(error);
+  return (data ?? []) as EventPoll[];
+}
+
+export async function createWeeklyEventCall(input: {
+  account: SportsAccount;
+  schedule: AccountSchedule;
+  priorityGroups: AccountPriorityGroup[];
+  createdBy: string;
+}) {
+  const existingEvent = await getCurrentWeeklyEvent(input.account.id);
+
+  if (existingEvent) {
+    throw new Error("Ja existe uma chamada semanal aberta para essa conta.");
+  }
+
+  const { startsAt, endsAt } = getNextScheduleWindow(input.schedule);
+  const confirmationOpensAt = new Date(startsAt);
+  confirmationOpensAt.setHours(
+    confirmationOpensAt.getHours() - input.account.confirmation_open_hours_before,
+  );
+
+  const confirmationClosesAt = new Date(startsAt);
+  confirmationClosesAt.setMinutes(
+    confirmationClosesAt.getMinutes() - input.account.confirmation_close_minutes_before,
+  );
+
+  const { data: eventData, error: eventError } = await supabase
+    .from("events")
+    .insert({
+      account_id: input.account.id,
+      schedule_id: input.schedule.id,
+      title: buildEventTitle(input.account.name, startsAt),
+      starts_at: startsAt.toISOString(),
+      ends_at: endsAt.toISOString(),
+      confirmation_opens_at: confirmationOpensAt.toISOString(),
+      confirmation_closes_at: confirmationClosesAt.toISOString(),
+      max_players: input.account.max_players_per_event,
+      status: "draft",
+      created_by: input.createdBy,
+    })
+    .select(eventSelectFields)
+    .single();
+
+  throwIfError(eventError);
+
+  const createdEvent = eventData as Event;
+  const [defaultPlayers, memberships] = await Promise.all([
+    supabase
+      .from("account_players")
+      .select(
+        "id, account_id, linked_profile_id, full_name, email, photo_url, priority_group_id, is_default_for_weekly_list, is_active, created_by, created_at, updated_at",
+      )
+      .eq("account_id", input.account.id)
+      .eq("is_active", true)
+      .eq("is_default_for_weekly_list", true)
+      .order("full_name", { ascending: true }),
+    listActiveMembershipsForAccount(input.account.id),
+  ]);
+
+  throwIfError(defaultPlayers.error);
+
+  const players = ((defaultPlayers.data ?? []) as AccountPlayer[]).sort((first, second) => {
+    const firstRank = getPriorityRank(first.priority_group_id, input.priorityGroups);
+    const secondRank = getPriorityRank(second.priority_group_id, input.priorityGroups);
+
+    if (firstRank !== secondRank) {
+      return firstRank - secondRank;
+    }
+
+    return first.full_name.localeCompare(second.full_name);
+  });
+
+  if (players.length > 0) {
+    const membershipByPlayerId = new Map(
+      memberships
+        .filter((membership) => membership.account_player_id)
+        .map((membership) => [membership.account_player_id as string, membership]),
+    );
+
+    const { error: insertParticipantError } = await supabase.from("event_participants").insert(
+      players.map((player, index) => {
+        const membership = membershipByPlayerId.get(player.id) ?? null;
+
+        return {
+          event_id: createdEvent.id,
+          membership_id: membership?.id ?? null,
+          account_player_id: player.id,
+          priority_group_id: player.priority_group_id,
+          priority_rank_snapshot: getPriorityRank(player.priority_group_id, input.priorityGroups),
+          roster_order: index + 1,
+          response_status: "pending",
+          selection_status: "active",
+          added_by: input.createdBy,
+        };
+      }),
+    );
+
+    throwIfError(insertParticipantError);
+  }
+
+  return createdEvent;
+}
+
+async function getDraftWeeklyEvent(eventId: string) {
+  const { data, error } = await supabase
+    .from("events")
+    .select(eventSelectFields)
+    .eq("id", eventId)
+    .single();
+
+  throwIfError(error);
+
+  const event = data as Event;
+
+  if (event.status !== "draft") {
+    throw new Error("A lista da semana ja foi fechada e nao pode mais ser alterada.");
+  }
+
+  return event;
+}
+
+export async function addPlayerToWeeklyEvent(input: {
+  eventId: string;
+  playerId: string;
+  addedBy: string;
+}) {
+  const event = await getDraftWeeklyEvent(input.eventId);
+
+  const [
+    { data: playerData, error: playerError },
+    memberships,
+    { data: priorityGroupData, error: priorityGroupError },
+    { data: existingParticipantData, error: existingParticipantError },
+  ] = await Promise.all([
+    supabase
+      .from("account_players")
+      .select(
+        "id, account_id, linked_profile_id, full_name, email, photo_url, priority_group_id, is_default_for_weekly_list, is_active, created_by, created_at, updated_at",
+      )
+      .eq("id", input.playerId)
+      .single(),
+    listActiveMembershipsForAccount(event.account_id),
+    supabase
+      .from("account_priority_groups")
+      .select("id, account_id, name, priority_rank, color_hex, is_active, created_at, updated_at")
+      .eq("account_id", event.account_id)
+      .eq("is_active", true),
+    supabase
+      .from("event_participants")
+      .select(eventParticipantSelectFields)
+      .eq("event_id", input.eventId)
+      .eq("account_player_id", input.playerId)
+      .maybeSingle(),
+  ]);
+
+  throwIfError(playerError);
+  throwIfError(priorityGroupError);
+  throwIfError(existingParticipantError);
+
+  const player = playerData as AccountPlayer;
+  const membership =
+    memberships.find((item) => item.account_player_id === input.playerId) ?? null;
+  const priorityGroups = (priorityGroupData ?? []) as AccountPriorityGroup[];
+  const priorityRankSnapshot = getPriorityRank(player.priority_group_id, priorityGroups);
+  const existingParticipant = (existingParticipantData as EventParticipant | null) ?? null;
+
+  if (existingParticipant) {
+    const { error: updateError } = await supabase
+      .from("event_participants")
+      .update({
+        membership_id: membership?.id ?? null,
+        priority_group_id: player.priority_group_id,
+        priority_rank_snapshot: priorityRankSnapshot,
+        selection_status: "active",
+        removed_reason: null,
+        selection_changed_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", existingParticipant.id);
+
+    throwIfError(updateError);
+  } else {
+    const { error: insertError } = await supabase.from("event_participants").insert({
+      event_id: input.eventId,
+      membership_id: membership?.id ?? null,
+      account_player_id: input.playerId,
+      priority_group_id: player.priority_group_id,
+      priority_rank_snapshot: priorityRankSnapshot,
+      roster_order: 999,
+      response_status: "pending",
+      selection_status: "active",
+      added_by: input.addedBy,
+    });
+
+    throwIfError(insertError);
+  }
+
+  await resequenceWeeklyEventParticipants(input.eventId);
+}
+
+export async function removePlayerFromWeeklyEvent(input: {
+  eventParticipantId: string;
+}) {
+  const { data: participantData, error: participantError } = await supabase
+    .from("event_participants")
+    .select(eventParticipantSelectFields)
+    .eq("id", input.eventParticipantId)
+    .single();
+
+  throwIfError(participantError);
+
+  const participant = participantData as EventParticipant;
+  await getDraftWeeklyEvent(participant.event_id);
+
+  const { error: updateError } = await supabase
+    .from("event_participants")
+    .update({
+      selection_status: "removed",
+      removed_reason: "manual_remove",
+      selection_changed_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", input.eventParticipantId);
+
+  throwIfError(updateError);
+  await resequenceWeeklyEventParticipants(participant.event_id);
+}
+
+export async function closeWeeklyEventList(eventId: string) {
+  await getDraftWeeklyEvent(eventId);
+
+  const now = new Date().toISOString();
+  const { error } = await supabase
+    .from("events")
+    .update({
+      status: "published",
+      published_at: now,
+      updated_at: now,
+    })
+    .eq("id", eventId);
+
+  throwIfError(error);
+}
+
+export async function createEventPollsFromTemplates(input: {
+  accountId: string;
+  eventId: string;
+  createdBy: string;
+}) {
+  const [{ data: eventData, error: eventError }, existingPolls, templates] = await Promise.all([
+    supabase.from("events").select(eventSelectFields).eq("id", input.eventId).single(),
+    listEventPolls(input.eventId),
+    listAccountPollTemplates(input.accountId),
+  ]);
+
+  throwIfError(eventError);
+
+  const event = eventData as Event;
+
+  if (event.status !== "published") {
+    throw new Error("Feche a lista semanal antes de criar as enquetes do evento.");
+  }
+
+  if (existingPolls.length > 0) {
+    throw new Error("As enquetes desse evento ja foram criadas.");
+  }
+
+  if (templates.length === 0) {
+    throw new Error("Cadastre pelo menos uma enquete recorrente para essa conta.");
+  }
+
+  const now = new Date().toISOString();
+  const { error } = await supabase.from("event_polls").insert(
+    templates.map((template, index) => ({
+      event_id: input.eventId,
+      template_id: template.id,
+      title: template.title,
+      description: template.description,
+      selection_mode: template.selection_mode,
+      status: "open",
+      opens_at: now,
+      sort_order: template.sort_order || index + 1,
+      created_by: input.createdBy,
+    })),
+  );
+
+  throwIfError(error);
+}
+
+export async function completeWeeklyEvent(eventId: string) {
+  const now = new Date().toISOString();
+  const { data: eventData, error: eventError } = await supabase
+    .from("events")
+    .select(eventSelectFields)
+    .eq("id", eventId)
+    .single();
+
+  throwIfError(eventError);
+
+  const event = eventData as Event;
+
+  if (event.status === "completed") {
+    return;
+  }
+
+  const { error: eventUpdateError } = await supabase
+    .from("events")
+    .update({
+      status: "completed",
+      completed_at: now,
+      updated_at: now,
+    })
+    .eq("id", eventId);
+
+  throwIfError(eventUpdateError);
+
+  const { error: pollUpdateError } = await supabase
+    .from("event_polls")
+    .update({
+      status: "closed",
+      closes_at: now,
+      updated_at: now,
+    })
+    .eq("event_id", eventId)
+    .in("status", ["draft", "open"]);
+
+  throwIfError(pollUpdateError);
 }
 
 export async function createAccountPlayer(input: CreateAccountPlayerInput) {
