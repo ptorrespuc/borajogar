@@ -36,6 +36,7 @@ import {
   updateAccountPlayer,
   updatePollTemplate,
   updateSportsAccount,
+  upsertAccountPlayerFromAccess,
   upsertAccountMembership,
   updateSportsAccountBasics,
   type AccountOverview,
@@ -87,7 +88,13 @@ type PriorityGroupDraft = {
   name: string;
 };
 
+type PositionDraft = {
+  id: string;
+  name: string;
+};
+
 let priorityGroupDraftCounter = 0;
+let positionDraftCounter = 0;
 
 type AccountAccessItem = {
   account: SportsAccount;
@@ -144,6 +151,15 @@ function createPriorityGroupDraft(name = ""): PriorityGroupDraft {
   };
 }
 
+function createPositionDraft(name = ""): PositionDraft {
+  positionDraftCounter += 1;
+
+  return {
+    id: `position-draft-${positionDraftCounter}`,
+    name,
+  };
+}
+
 function buildPriorityGroupDrafts(names: string[]) {
   const normalizedNames = [...new Set(names.map((item) => item.trim()).filter(Boolean))];
 
@@ -152,6 +168,16 @@ function buildPriorityGroupDrafts(names: string[]) {
   }
 
   return normalizedNames.map((name) => createPriorityGroupDraft(name));
+}
+
+function buildPositionDrafts(names: string[]) {
+  const normalizedNames = [...new Set(names.map((item) => item.trim()).filter(Boolean))];
+
+  if (normalizedNames.length === 0) {
+    return [createPositionDraft("Goleiro")];
+  }
+
+  return normalizedNames.map((name) => createPositionDraft(name));
 }
 
 function mapPriorityGroupsForSave(drafts: PriorityGroupDraft[]) {
@@ -204,8 +230,8 @@ export default function HomeScreen() {
   const [createModalityNameDraft, setCreateModalityNameDraft] = useState("");
   const [createModalitySlugDraft, setCreateModalitySlugDraft] = useState("");
   const [createModalityPlayersDraft, setCreateModalityPlayersDraft] = useState("5");
-  const [createModalityPositionsDraft, setCreateModalityPositionsDraft] = useState(
-    "Goleiro, Zagueiro, Ala, Meio-campo, Atacante",
+  const [modalityPositionDrafts, setModalityPositionDrafts] = useState<PositionDraft[]>(() =>
+    buildPositionDrafts(["Goleiro", "Zagueiro", "Ala", "Meio-campo", "Atacante"]),
   );
 
   const [createNameDraft, setCreateNameDraft] = useState("");
@@ -221,17 +247,22 @@ export default function HomeScreen() {
     buildPriorityGroupDrafts(defaultPriorityGroupNames),
   );
   const [membershipAccountIdDraft, setMembershipAccountIdDraft] = useState<string | null>(null);
+  const [membershipNameDraft, setMembershipNameDraft] = useState("");
   const [membershipEmailDraft, setMembershipEmailDraft] = useState("");
+  const [membershipPhotoUrlDraft, setMembershipPhotoUrlDraft] = useState("");
   const [membershipRoleModalDraft, setMembershipRoleModalDraft] = useState<AccountRole>("player");
   const [membershipPriorityGroupModalId, setMembershipPriorityGroupModalId] = useState<string | null>(null);
   const [membershipProfileIdDraft, setMembershipProfileIdDraft] = useState<string | null>(null);
+  const [membershipPreferredPositionIds, setMembershipPreferredPositionIds] = useState<string[]>([]);
   const [membershipPriorityOptions, setMembershipPriorityOptions] = useState<Array<{
     id: string;
     name: string;
     priority_rank: number;
   }>>([]);
+  const [membershipPositionOptions, setMembershipPositionOptions] = useState<ModalityPosition[]>([]);
   const [playerNameDraft, setPlayerNameDraft] = useState("");
   const [playerEmailDraft, setPlayerEmailDraft] = useState("");
+  const [playerPhotoUrlDraft, setPlayerPhotoUrlDraft] = useState("");
   const [playerPriorityGroupDraftId, setPlayerPriorityGroupDraftId] = useState<string | null>(null);
   const [playerPreferredPositionIds, setPlayerPreferredPositionIds] = useState<string[]>([]);
   const [playerWeeklyDefaultDraft, setPlayerWeeklyDefaultDraft] = useState(true);
@@ -467,6 +498,7 @@ export default function HomeScreen() {
 
     if (!membershipAccountIdDraft) {
       setMembershipPriorityOptions([]);
+      setMembershipPositionOptions([]);
       setMembershipPriorityGroupModalId(null);
       return;
     }
@@ -477,6 +509,7 @@ export default function HomeScreen() {
     async function syncPriorityGroups() {
       try {
         const accountOverview = await getAccountOverview(accountId);
+        const positions = await listModalityPositions(accountOverview.account.modality_id);
 
         if (!isActive) {
           return;
@@ -490,6 +523,7 @@ export default function HomeScreen() {
 
         setMembershipPriorityOptions(priorityOptions);
         setMembershipPriorityGroupModalId(priorityOptions[0]?.id ?? null);
+        setMembershipPositionOptions(positions);
       } catch (loadError) {
         if (isActive) {
           setMessage({ tone: "error", text: getReadableError(loadError) });
@@ -521,6 +555,12 @@ export default function HomeScreen() {
         : membershipPriorityOptions[0].id,
     );
   }, [membershipRoleModalDraft, membershipPriorityOptions]);
+
+  useEffect(() => {
+    setMembershipPreferredPositionIds((currentValue) =>
+      currentValue.filter((positionId) => membershipPositionOptions.some((position) => position.id === positionId)),
+    );
+  }, [membershipPositionOptions]);
 
   async function reloadAccounts() {
     if (!profile?.is_super_admin) {
@@ -581,7 +621,9 @@ export default function HomeScreen() {
     setCreateModalityNameDraft("");
     setCreateModalitySlugDraft("");
     setCreateModalityPlayersDraft("5");
-    setCreateModalityPositionsDraft("Goleiro, Zagueiro, Ala, Meio-campo, Atacante");
+    setModalityPositionDrafts(
+      buildPositionDrafts(["Goleiro", "Zagueiro", "Ala", "Meio-campo", "Atacante"]),
+    );
   }
 
   function resetAccountForm() {
@@ -601,6 +643,50 @@ export default function HomeScreen() {
     setPriorityGroupDrafts((currentValue) =>
       currentValue.map((item) => (item.id === draftId ? { ...item, name: nextName } : item)),
     );
+  }
+
+  function updatePositionDraftName(draftId: string, nextName: string) {
+    setModalityPositionDrafts((currentValue) =>
+      currentValue.map((item) => (item.id === draftId ? { ...item, name: nextName } : item)),
+    );
+  }
+
+  function addPositionDraft() {
+    setModalityPositionDrafts((currentValue) => [
+      ...currentValue,
+      createPositionDraft(`Posicao ${currentValue.length + 1}`),
+    ]);
+  }
+
+  function removePositionDraft(draftId: string) {
+    setModalityPositionDrafts((currentValue) => {
+      if (currentValue.length <= 1) {
+        return currentValue;
+      }
+
+      return currentValue.filter((item) => item.id !== draftId);
+    });
+  }
+
+  function movePositionDraft(draftId: string, direction: -1 | 1) {
+    setModalityPositionDrafts((currentValue) => {
+      const currentIndex = currentValue.findIndex((item) => item.id === draftId);
+
+      if (currentIndex === -1) {
+        return currentValue;
+      }
+
+      const nextIndex = currentIndex + direction;
+
+      if (nextIndex < 0 || nextIndex >= currentValue.length) {
+        return currentValue;
+      }
+
+      const nextValue = [...currentValue];
+      const [movedItem] = nextValue.splice(currentIndex, 1);
+      nextValue.splice(nextIndex, 0, movedItem);
+      return nextValue;
+    });
   }
 
   function addPriorityGroupDraft() {
@@ -676,16 +762,21 @@ export default function HomeScreen() {
   function resetMembershipForm() {
     const firstAccountId = superAdminAccounts[0]?.id ?? null;
     setMembershipAccountIdDraft(firstAccountId);
+    setMembershipNameDraft("");
     setMembershipEmailDraft("");
+    setMembershipPhotoUrlDraft("");
     setMembershipRoleModalDraft("player");
     setMembershipProfileIdDraft(null);
+    setMembershipPreferredPositionIds([]);
     setMembershipPriorityOptions([]);
+    setMembershipPositionOptions([]);
     setMembershipPriorityGroupModalId(null);
   }
 
   function resetPlayerForm() {
     setPlayerNameDraft("");
     setPlayerEmailDraft("");
+    setPlayerPhotoUrlDraft("");
     setPlayerPriorityGroupDraftId(overview?.priorityGroups[0]?.id ?? null);
     setPlayerPreferredPositionIds([]);
     setPlayerWeeklyDefaultDraft(true);
@@ -723,7 +814,7 @@ export default function HomeScreen() {
       setCreateModalityNameDraft(modality.name);
       setCreateModalitySlugDraft(modality.slug);
       setCreateModalityPlayersDraft(String(modality.players_per_team));
-      setCreateModalityPositionsDraft(positions.map((position) => position.name).join(", "));
+      setModalityPositionDrafts(buildPositionDrafts(positions.map((position) => position.name)));
     } catch (loadError) {
       setMessage({ tone: "error", text: getReadableError(loadError) });
       setAdminModal(null);
@@ -800,10 +891,27 @@ export default function HomeScreen() {
 
     try {
       setMembershipAccountIdDraft(item.account.id);
+      setMembershipNameDraft(item.profile.full_name);
       setMembershipEmailDraft(item.profile.email);
+      setMembershipPhotoUrlDraft(item.profile.photo_url ?? "");
       setMembershipRoleModalDraft(item.membership.role);
       setMembershipProfileIdDraft(item.profile.id);
       await hydrateMembershipPriorityOptions(item.account.id, item.priorityGroup?.id ?? null);
+      const accountOverview =
+        overview?.account.id === item.account.id ? overview : await getAccountOverview(item.account.id);
+      const positions = await listModalityPositions(accountOverview.account.modality_id);
+      const players = await listAccountPlayers(item.account.id, accountOverview.account.modality_id);
+      const linkedPlayer =
+        players.find((player) => player.player.id === item.membership.account_player_id) ??
+        players.find((player) => player.player.linked_profile_id === item.profile.id) ??
+        null;
+
+      setMembershipNameDraft(linkedPlayer?.player.full_name ?? item.profile.full_name);
+      setMembershipPhotoUrlDraft(linkedPlayer?.player.photo_url ?? item.profile.photo_url ?? "");
+      setMembershipPreferredPositionIds(
+        linkedPlayer?.preferredPositions.map((position) => position.id) ?? [],
+      );
+      setMembershipPositionOptions(positions);
     } catch (loadError) {
       setMessage({ tone: "error", text: getReadableError(loadError) });
       setAdminModal(null);
@@ -832,6 +940,7 @@ export default function HomeScreen() {
 
     setPlayerNameDraft(item.player.full_name);
     setPlayerEmailDraft(item.player.email ?? "");
+    setPlayerPhotoUrlDraft(item.player.photo_url ?? "");
     setPlayerPriorityGroupDraftId(item.player.priority_group_id ?? overview.priorityGroups[0]?.id ?? null);
     setPlayerPreferredPositionIds(item.preferredPositions.map((position) => position.id));
     setPlayerWeeklyDefaultDraft(item.player.is_default_for_weekly_list);
@@ -1024,7 +1133,9 @@ export default function HomeScreen() {
 
     const slug = createModalitySlugDraft.trim() || slugify(createModalityNameDraft);
     const playersPerTeam = Number(createModalityPlayersDraft);
-    const positions = parsePositions(createModalityPositionsDraft);
+    const positions = [
+      ...new Set(modalityPositionDrafts.map((position) => position.name.trim()).filter(Boolean)),
+    ];
 
     if (
       !createModalityNameDraft.trim() ||
@@ -1162,6 +1273,11 @@ export default function HomeScreen() {
       return;
     }
 
+    if (!membershipNameDraft.trim()) {
+      setMessage({ tone: "error", text: "Informe o nome do usuario vinculado." });
+      return;
+    }
+
     if (membershipRoleModalDraft === "player" && !membershipPriorityGroupModalId) {
       setMessage({ tone: "error", text: "Selecione o grupo prioritario do jogador." });
       return;
@@ -1173,28 +1289,41 @@ export default function HomeScreen() {
     try {
       const isEditing = adminModal?.type === "membership" && adminModal.mode === "edit";
       let profileId = membershipProfileIdDraft;
+      let accountPlayerId: string | null = null;
       let profileLabel = membershipEmailDraft.trim().toLowerCase();
+      const normalizedEmail = membershipEmailDraft.trim().toLowerCase();
 
-      if (!isEditing) {
-        const normalizedEmail = membershipEmailDraft.trim().toLowerCase();
+      if (!normalizedEmail || !normalizedEmail.includes("@")) {
+        setMessage({ tone: "error", text: "Informe um email valido para o vinculo." });
+        return;
+      }
 
-        if (!normalizedEmail || !normalizedEmail.includes("@")) {
-          setMessage({ tone: "error", text: "Informe um email valido para o vinculo." });
-          return;
-        }
+      const linkedProfile = await findProfileByEmail(normalizedEmail);
 
-        const linkedProfile = await findProfileByEmail(normalizedEmail);
+      if (!linkedProfile) {
+        setMessage({
+          tone: "error",
+          text: "Esse email ainda nao tem login no BoraJogar. Cadastre o jogador na aba Jogadores ou peca para ele criar a conta primeiro.",
+        });
+        return;
+      }
 
-        if (!linkedProfile) {
-          setMessage({
-            tone: "error",
-            text: "Esse email ainda nao tem perfil. O usuario precisa entrar no app uma vez antes do vinculo.",
-          });
-          return;
-        }
+      profileId = linkedProfile.id;
+      profileLabel = linkedProfile.full_name || linkedProfile.email;
 
-        profileId = linkedProfile.id;
-        profileLabel = linkedProfile.full_name || linkedProfile.email;
+      if (membershipRoleModalDraft === "player" && profileId && profile?.id) {
+        const linkedPlayer = await upsertAccountPlayerFromAccess({
+          accountId: membershipAccountIdDraft,
+          fullName: membershipNameDraft.trim(),
+          email: normalizedEmail,
+          photoUrl: membershipPhotoUrlDraft.trim() || linkedProfile.photo_url || null,
+          linkedProfileId: profileId,
+          priorityGroupId: membershipPriorityGroupModalId,
+          preferredPositionIds: membershipPreferredPositionIds,
+          createdBy: profile.id,
+        });
+
+        accountPlayerId = linkedPlayer.id;
       }
 
       if (!profileId) {
@@ -1205,11 +1334,13 @@ export default function HomeScreen() {
       await upsertAccountMembership({
         accountId: membershipAccountIdDraft,
         profileId,
+        accountPlayerId,
         role: membershipRoleModalDraft,
         priorityGroupId: membershipRoleModalDraft === "player" ? membershipPriorityGroupModalId : null,
       });
 
       await reloadMemberships();
+      await reloadSelectedWorkspace();
       await refresh();
 
       if (selectedAccountId === membershipAccountIdDraft) {
@@ -1249,6 +1380,14 @@ export default function HomeScreen() {
     );
   }
 
+  function toggleMembershipPreferredPosition(positionId: string) {
+    setMembershipPreferredPositionIds((currentValue) =>
+      currentValue.includes(positionId)
+        ? currentValue.filter((item) => item !== positionId)
+        : [...currentValue, positionId],
+    );
+  }
+
   async function handleSavePlayer() {
     if (!selectedAccess || !overview || !profile) {
       return;
@@ -1276,6 +1415,7 @@ export default function HomeScreen() {
           playerId: adminModal.targetId,
           fullName: playerNameDraft.trim(),
           email: playerEmailDraft.trim() || null,
+          photoUrl: playerPhotoUrlDraft.trim() || null,
           linkedProfileId,
           priorityGroupId: playerPriorityGroupDraftId,
           isDefaultForWeeklyList: playerWeeklyDefaultDraft,
@@ -1286,6 +1426,7 @@ export default function HomeScreen() {
           accountId: selectedAccess.account.id,
           fullName: playerNameDraft.trim(),
           email: playerEmailDraft.trim() || null,
+          photoUrl: playerPhotoUrlDraft.trim() || null,
           linkedProfileId,
           priorityGroupId: playerPriorityGroupDraftId,
           isDefaultForWeeklyList: playerWeeklyDefaultDraft,
@@ -1441,6 +1582,7 @@ export default function HomeScreen() {
         playerId: item.player.id,
         fullName: item.player.full_name,
         email: item.player.email,
+        photoUrl: item.player.photo_url,
         linkedProfileId: item.player.linked_profile_id,
         priorityGroupId: item.player.priority_group_id,
         isDefaultForWeeklyList: nextValue,
@@ -1739,37 +1881,103 @@ export default function HomeScreen() {
               <ScrollView contentContainerStyle={styles.modalContent}>
                 {isModalityModal ? (
                   <>
-                    <TextInput
-                      value={createModalityNameDraft}
-                      onChangeText={setCreateModalityNameDraft}
-                      placeholder="Nome da modalidade"
-                      placeholderTextColor={Colors.textMuted}
-                      style={styles.input}
-                    />
-                    <TextInput
-                      value={createModalitySlugDraft}
-                      onChangeText={(value) => setCreateModalitySlugDraft(slugify(value))}
-                      placeholder="futebol-society"
-                      placeholderTextColor={Colors.textMuted}
-                      style={styles.input}
-                      autoCapitalize="none"
-                    />
-                    <TextInput
-                      value={createModalityPlayersDraft}
-                      onChangeText={setCreateModalityPlayersDraft}
-                      placeholder="Jogadores por equipe"
-                      placeholderTextColor={Colors.textMuted}
-                      keyboardType="number-pad"
-                      style={styles.input}
-                    />
-                    <TextInput
-                      value={createModalityPositionsDraft}
-                      onChangeText={setCreateModalityPositionsDraft}
-                      placeholder="Goleiro, Zagueiro, Ala, Atacante"
-                      placeholderTextColor={Colors.textMuted}
-                      style={[styles.input, styles.multiline]}
-                      multiline
-                    />
+                    <View style={styles.formSection}>
+                      <Text style={styles.formSectionTitle}>Dados da modalidade</Text>
+
+                      <View style={styles.fieldBlock}>
+                        <Text style={styles.label}>Nome da modalidade</Text>
+                        <TextInput
+                          value={createModalityNameDraft}
+                          onChangeText={setCreateModalityNameDraft}
+                          placeholder="Futebol society"
+                          placeholderTextColor={Colors.textMuted}
+                          style={styles.input}
+                        />
+                      </View>
+
+                      <View style={styles.fieldBlock}>
+                        <Text style={styles.label}>Identificador</Text>
+                        <TextInput
+                          value={createModalitySlugDraft}
+                          onChangeText={(value) => setCreateModalitySlugDraft(slugify(value))}
+                          placeholder="futebol-society"
+                          placeholderTextColor={Colors.textMuted}
+                          style={styles.input}
+                          autoCapitalize="none"
+                        />
+                      </View>
+
+                      <View style={styles.fieldBlock}>
+                        <Text style={styles.label}>Jogadores por equipe</Text>
+                        <TextInput
+                          value={createModalityPlayersDraft}
+                          onChangeText={setCreateModalityPlayersDraft}
+                          placeholder="5"
+                          placeholderTextColor={Colors.textMuted}
+                          keyboardType="number-pad"
+                          style={styles.input}
+                        />
+                      </View>
+                    </View>
+
+                    <View style={styles.formSection}>
+                      <View style={styles.inlineHeader}>
+                        <View style={styles.inlineHeaderContent}>
+                          <Text style={styles.formSectionTitle}>Posicoes da modalidade</Text>
+                          <Text style={styles.fieldHint}>
+                            Cadastre as posicoes validas dessa modalidade. A ordem vira a ordem padrao de exibicao.
+                          </Text>
+                        </View>
+                        <Pressable onPress={addPositionDraft} style={styles.secondaryButton}>
+                          <Text style={styles.secondaryButtonText}>Adicionar</Text>
+                        </Pressable>
+                      </View>
+
+                      {modalityPositionDrafts.map((position, index) => (
+                        <View key={position.id} style={styles.priorityEditorCard}>
+                          <View style={styles.priorityEditorHeader}>
+                            <Text style={styles.priorityEditorTitle}>{index + 1}. Posicao</Text>
+                            <View style={styles.priorityEditorActions}>
+                              <Pressable
+                                onPress={() => movePositionDraft(position.id, -1)}
+                                disabled={index === 0}
+                                style={[styles.inlineActionButton, index === 0 && styles.buttonDisabled]}>
+                                <Text style={styles.inlineActionText}>Subir</Text>
+                              </Pressable>
+                              <Pressable
+                                onPress={() => movePositionDraft(position.id, 1)}
+                                disabled={index === modalityPositionDrafts.length - 1}
+                                style={[
+                                  styles.inlineActionButton,
+                                  index === modalityPositionDrafts.length - 1 && styles.buttonDisabled,
+                                ]}>
+                                <Text style={styles.inlineActionText}>Descer</Text>
+                              </Pressable>
+                              <Pressable
+                                onPress={() => removePositionDraft(position.id)}
+                                disabled={modalityPositionDrafts.length === 1}
+                                style={[
+                                  styles.inlineDangerButton,
+                                  modalityPositionDrafts.length === 1 && styles.buttonDisabled,
+                                ]}>
+                                <Text style={styles.inlineDangerText}>
+                                  {modalityPositionDrafts.length === 1 ? "Minimo 1" : "Excluir"}
+                                </Text>
+                              </Pressable>
+                            </View>
+                          </View>
+
+                          <TextInput
+                            value={position.name}
+                            onChangeText={(value) => updatePositionDraftName(position.id, value)}
+                            placeholder={`Nome da posicao ${index + 1}`}
+                            placeholderTextColor={Colors.textMuted}
+                            style={styles.input}
+                          />
+                        </View>
+                      ))}
+                    </View>
+
                     <Pressable
                       onPress={() => void handleCreateModality()}
                       disabled={isSubmittingModal}
@@ -1785,84 +1993,150 @@ export default function HomeScreen() {
                   </>
                 ) : isMembershipModal ? (
                   <>
-                    <Text style={styles.label}>Conta esportiva</Text>
-                    <View style={styles.chips}>
-                      {superAdminAccounts.map((account) => (
-                        <Pressable
-                          key={account.id}
-                          onPress={() => setMembershipAccountIdDraft(account.id)}
-                          disabled={adminModal.mode === "edit"}
-                          style={[
-                            styles.chip,
-                            membershipAccountIdDraft === account.id && styles.chipSelected,
-                            adminModal.mode === "edit" && styles.buttonDisabled,
-                          ]}>
-                          <Text
-                            style={[
-                              styles.chipText,
-                              membershipAccountIdDraft === account.id && styles.chipTextSelected,
-                            ]}>
-                            {account.name}
-                          </Text>
-                        </Pressable>
-                      ))}
-                    </View>
+                    <View style={styles.formSection}>
+                      <Text style={styles.formSectionTitle}>Acesso do usuario</Text>
+                      <Text style={styles.fieldHint}>
+                        O email precisa existir como login no BoraJogar. Esse fluxo tambem atualiza o cadastro do jogador da conta.
+                      </Text>
 
-                    <TextInput
-                      value={membershipEmailDraft}
-                      onChangeText={setMembershipEmailDraft}
-                      placeholder="email@exemplo.com"
-                      placeholderTextColor={Colors.textMuted}
-                      autoCapitalize="none"
-                      editable={adminModal.mode !== "edit"}
-                      keyboardType="email-address"
-                      style={[styles.input, adminModal.mode === "edit" && styles.inputReadOnly]}
-                    />
-
-                    <Text style={styles.label}>Papel na conta</Text>
-                    <View style={styles.chips}>
-                      {(Object.entries(roleLabels) as [AccountRole, string][]).map(([role, label]) => (
-                        <Pressable
-                          key={role}
-                          onPress={() => setMembershipRoleModalDraft(role)}
-                          style={[
-                            styles.chip,
-                            membershipRoleModalDraft === role && styles.chipSelected,
-                          ]}>
-                          <Text
-                            style={[
-                              styles.chipText,
-                              membershipRoleModalDraft === role && styles.chipTextSelected,
-                            ]}>
-                            {label}
-                          </Text>
-                        </Pressable>
-                      ))}
-                    </View>
-
-                    {membershipRoleModalDraft === "player" ? (
-                      <>
-                        <Text style={styles.label}>Grupo prioritario</Text>
+                      <View style={styles.fieldBlock}>
+                        <Text style={styles.label}>Conta esportiva</Text>
                         <View style={styles.chips}>
-                          {membershipPriorityOptions.map((group) => (
+                          {superAdminAccounts.map((account) => (
                             <Pressable
-                              key={group.id}
-                              onPress={() => setMembershipPriorityGroupModalId(group.id)}
+                              key={account.id}
+                              onPress={() => setMembershipAccountIdDraft(account.id)}
+                              disabled={adminModal.mode === "edit"}
                               style={[
                                 styles.chip,
-                                membershipPriorityGroupModalId === group.id && styles.chipSelected,
+                                membershipAccountIdDraft === account.id && styles.chipSelected,
+                                adminModal.mode === "edit" && styles.buttonDisabled,
                               ]}>
                               <Text
                                 style={[
                                   styles.chipText,
-                                  membershipPriorityGroupModalId === group.id && styles.chipTextSelected,
+                                  membershipAccountIdDraft === account.id && styles.chipTextSelected,
                                 ]}>
-                                {group.priority_rank}. {group.name}
+                                {account.name}
                               </Text>
                             </Pressable>
                           ))}
                         </View>
-                      </>
+                      </View>
+
+                      <View style={styles.fieldBlock}>
+                        <Text style={styles.label}>Nome do usuario / jogador</Text>
+                        <TextInput
+                          value={membershipNameDraft}
+                          onChangeText={setMembershipNameDraft}
+                          placeholder="Nome completo"
+                          placeholderTextColor={Colors.textMuted}
+                          style={styles.input}
+                        />
+                      </View>
+
+                      <View style={styles.fieldBlock}>
+                        <Text style={styles.label}>Email do login</Text>
+                        <TextInput
+                          value={membershipEmailDraft}
+                          onChangeText={setMembershipEmailDraft}
+                          placeholder="email@exemplo.com"
+                          placeholderTextColor={Colors.textMuted}
+                          autoCapitalize="none"
+                          editable={adminModal.mode !== "edit"}
+                          keyboardType="email-address"
+                          style={[styles.input, adminModal.mode === "edit" && styles.inputReadOnly]}
+                        />
+                      </View>
+
+                      <View style={styles.fieldBlock}>
+                        <Text style={styles.label}>Foto do jogador</Text>
+                        <TextInput
+                          value={membershipPhotoUrlDraft}
+                          onChangeText={setMembershipPhotoUrlDraft}
+                          placeholder="https://..."
+                          placeholderTextColor={Colors.textMuted}
+                          autoCapitalize="none"
+                          style={styles.input}
+                        />
+                      </View>
+
+                      <View style={styles.fieldBlock}>
+                        <Text style={styles.label}>Papel na conta</Text>
+                        <View style={styles.chips}>
+                          {(Object.entries(roleLabels) as [AccountRole, string][]).map(([role, label]) => (
+                            <Pressable
+                              key={role}
+                              onPress={() => setMembershipRoleModalDraft(role)}
+                              style={[
+                                styles.chip,
+                                membershipRoleModalDraft === role && styles.chipSelected,
+                              ]}>
+                              <Text
+                                style={[
+                                  styles.chipText,
+                                  membershipRoleModalDraft === role && styles.chipTextSelected,
+                                ]}>
+                                {label}
+                              </Text>
+                            </Pressable>
+                          ))}
+                        </View>
+                      </View>
+                    </View>
+
+                    {membershipRoleModalDraft === "player" ? (
+                      <View style={styles.formSection}>
+                        <Text style={styles.formSectionTitle}>Dados esportivos do jogador</Text>
+
+                        <View style={styles.fieldBlock}>
+                          <Text style={styles.label}>Grupo prioritario</Text>
+                          <View style={styles.chips}>
+                            {membershipPriorityOptions.map((group) => (
+                              <Pressable
+                                key={group.id}
+                                onPress={() => setMembershipPriorityGroupModalId(group.id)}
+                                style={[
+                                  styles.chip,
+                                  membershipPriorityGroupModalId === group.id && styles.chipSelected,
+                                ]}>
+                                <Text
+                                  style={[
+                                    styles.chipText,
+                                    membershipPriorityGroupModalId === group.id && styles.chipTextSelected,
+                                  ]}>
+                                  {group.priority_rank}. {group.name}
+                                </Text>
+                              </Pressable>
+                            ))}
+                          </View>
+                        </View>
+
+                        <View style={styles.fieldBlock}>
+                          <Text style={styles.label}>Posicoes favoritas</Text>
+                          <Text style={styles.fieldHint}>
+                            Selecione as posicoes na ordem de preferencia do jogador.
+                          </Text>
+                          <View style={styles.chips}>
+                            {membershipPositionOptions.map((position) => {
+                              const selectedIndex = membershipPreferredPositionIds.indexOf(position.id);
+                              const isSelected = selectedIndex >= 0;
+
+                              return (
+                                <Pressable
+                                  key={position.id}
+                                  onPress={() => toggleMembershipPreferredPosition(position.id)}
+                                  style={[styles.chip, isSelected && styles.chipSelected]}>
+                                  <Text style={[styles.chipText, isSelected && styles.chipTextSelected]}>
+                                    {isSelected ? `${selectedIndex + 1}. ` : ""}
+                                    {position.name}
+                                  </Text>
+                                </Pressable>
+                              );
+                            })}
+                          </View>
+                        </View>
+                      </View>
                     ) : null}
 
                     <Pressable
@@ -1909,6 +2183,18 @@ export default function HomeScreen() {
                           placeholderTextColor={Colors.textMuted}
                           autoCapitalize="none"
                           keyboardType="email-address"
+                          style={styles.input}
+                        />
+                      </View>
+
+                      <View style={styles.fieldBlock}>
+                        <Text style={styles.label}>Foto do jogador</Text>
+                        <TextInput
+                          value={playerPhotoUrlDraft}
+                          onChangeText={setPlayerPhotoUrlDraft}
+                          placeholder="https://..."
+                          placeholderTextColor={Colors.textMuted}
+                          autoCapitalize="none"
                           style={styles.input}
                         />
                       </View>

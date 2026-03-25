@@ -48,6 +48,7 @@ export type CreateAccountPlayerInput = {
   accountId: string;
   fullName: string;
   email: string | null;
+  photoUrl: string | null;
   linkedProfileId: string | null;
   priorityGroupId: string | null;
   isDefaultForWeeklyList: boolean;
@@ -59,10 +60,22 @@ export type UpdateAccountPlayerInput = {
   playerId: string;
   fullName: string;
   email: string | null;
+  photoUrl: string | null;
   linkedProfileId: string | null;
   priorityGroupId: string | null;
   isDefaultForWeeklyList: boolean;
   preferredPositionIds: string[];
+};
+
+export type UpsertAccountPlayerFromAccessInput = {
+  accountId: string;
+  fullName: string;
+  email: string;
+  photoUrl: string | null;
+  linkedProfileId: string;
+  priorityGroupId: string | null;
+  preferredPositionIds: string[];
+  createdBy: string;
 };
 
 export type CreatePollTemplateInput = {
@@ -966,6 +979,7 @@ export async function createAccountPlayer(input: CreateAccountPlayerInput) {
       linked_profile_id: input.linkedProfileId,
       full_name: input.fullName,
       email: normalizedEmail,
+      photo_url: input.photoUrl,
       priority_group_id: input.priorityGroupId,
       is_default_for_weekly_list: input.isDefaultForWeeklyList,
       is_active: true,
@@ -1011,8 +1025,10 @@ export async function updateAccountPlayer(input: UpdateAccountPlayerInput) {
       linked_profile_id: input.linkedProfileId,
       full_name: input.fullName,
       email: normalizedEmail,
+      photo_url: input.photoUrl,
       priority_group_id: input.priorityGroupId,
       is_default_for_weekly_list: input.isDefaultForWeeklyList,
+      is_active: true,
       updated_at: new Date().toISOString(),
     })
     .eq("id", input.playerId);
@@ -1025,6 +1041,75 @@ export async function updateAccountPlayer(input: UpdateAccountPlayerInput) {
     linkedProfileId: input.linkedProfileId,
     accountPlayerId: input.playerId,
     priorityGroupId: input.priorityGroupId,
+  });
+}
+
+export async function upsertAccountPlayerFromAccess(
+  input: UpsertAccountPlayerFromAccessInput,
+): Promise<AccountPlayer> {
+  const normalizedEmail = input.email.trim().toLowerCase();
+
+  const { data: linkedPlayerData, error: linkedPlayerError } = await supabase
+    .from("account_players")
+    .select(
+      "id, account_id, linked_profile_id, full_name, email, photo_url, priority_group_id, is_default_for_weekly_list, is_active, created_by, created_at, updated_at",
+    )
+    .eq("account_id", input.accountId)
+    .eq("linked_profile_id", input.linkedProfileId)
+    .maybeSingle();
+
+  throwIfError(linkedPlayerError);
+
+  let existingPlayer = (linkedPlayerData as AccountPlayer | null) ?? null;
+
+  if (!existingPlayer) {
+    const { data: emailPlayerData, error: emailPlayerError } = await supabase
+      .from("account_players")
+      .select(
+        "id, account_id, linked_profile_id, full_name, email, photo_url, priority_group_id, is_default_for_weekly_list, is_active, created_by, created_at, updated_at",
+      )
+      .eq("account_id", input.accountId)
+      .ilike("email", normalizedEmail)
+      .maybeSingle();
+
+    throwIfError(emailPlayerError);
+    existingPlayer = (emailPlayerData as AccountPlayer | null) ?? null;
+  }
+
+  if (existingPlayer) {
+    await updateAccountPlayer({
+      playerId: existingPlayer.id,
+      fullName: input.fullName,
+      email: normalizedEmail,
+      photoUrl: input.photoUrl,
+      linkedProfileId: input.linkedProfileId,
+      priorityGroupId: input.priorityGroupId,
+      isDefaultForWeeklyList: existingPlayer.is_default_for_weekly_list,
+      preferredPositionIds: input.preferredPositionIds,
+    });
+
+    const { data: updatedPlayerData, error: updatedPlayerError } = await supabase
+      .from("account_players")
+      .select(
+        "id, account_id, linked_profile_id, full_name, email, photo_url, priority_group_id, is_default_for_weekly_list, is_active, created_by, created_at, updated_at",
+      )
+      .eq("id", existingPlayer.id)
+      .single();
+
+    throwIfError(updatedPlayerError);
+    return updatedPlayerData as AccountPlayer;
+  }
+
+  return createAccountPlayer({
+    accountId: input.accountId,
+    fullName: input.fullName,
+    email: normalizedEmail,
+    photoUrl: input.photoUrl,
+    linkedProfileId: input.linkedProfileId,
+    priorityGroupId: input.priorityGroupId,
+    isDefaultForWeeklyList: true,
+    createdBy: input.createdBy,
+    preferredPositionIds: input.preferredPositionIds,
   });
 }
 
