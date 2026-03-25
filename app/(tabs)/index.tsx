@@ -370,6 +370,8 @@ export default function HomeScreen() {
 
   const selectedAccess = availableAccounts.find((item) => item.account.id === selectedAccountId) ?? null;
   const selectedMembership = memberships.find((item) => item.account.id === selectedAccountId) ?? null;
+  const selectedAccessAccountId = selectedAccess?.account.id ?? null;
+  const selectedOverviewModalityId = overview?.account.modality_id ?? null;
 
   useEffect(() => {
     if (availableAccounts.length === 0) {
@@ -386,9 +388,10 @@ export default function HomeScreen() {
     let isActive = true;
 
     async function loadOverview() {
-      if (!selectedAccess) {
+      if (!selectedAccessAccountId) {
         setOverview(null);
         setOverviewError(null);
+        setIsOverviewLoading(false);
         return;
       }
 
@@ -396,7 +399,7 @@ export default function HomeScreen() {
       setOverviewError(null);
 
       try {
-        const nextOverview = await getAccountOverview(selectedAccess.account.id);
+        const nextOverview = await getAccountOverview(selectedAccessAccountId);
 
         if (!isActive) {
           return;
@@ -420,7 +423,7 @@ export default function HomeScreen() {
     return () => {
       isActive = false;
     };
-  }, [selectedAccess]);
+  }, [selectedAccessAccountId]);
 
   useEffect(() => {
     if (!overview) {
@@ -445,10 +448,11 @@ export default function HomeScreen() {
         profile?.is_super_admin || selectedMembership?.membership.role === "group_admin",
       );
 
-      if (!selectedAccess || !overview || !canManageCurrentAccount) {
+      if (!selectedAccessAccountId || !selectedOverviewModalityId || !canManageCurrentAccount) {
         setAccountPlayers([]);
         setAccountPollTemplates([]);
         setModalityPositions([]);
+        setIsWorkspaceLoading(false);
         return;
       }
 
@@ -456,9 +460,9 @@ export default function HomeScreen() {
 
       try {
         const [nextPlayers, nextPollTemplates, nextPositions] = await Promise.all([
-          listAccountPlayers(selectedAccess.account.id, overview.account.modality_id),
-          listAccountPollTemplates(selectedAccess.account.id),
-          listModalityPositions(overview.account.modality_id),
+          listAccountPlayers(selectedAccessAccountId, selectedOverviewModalityId),
+          listAccountPollTemplates(selectedAccessAccountId),
+          listModalityPositions(selectedOverviewModalityId),
         ]);
 
         if (!isActive) {
@@ -485,9 +489,9 @@ export default function HomeScreen() {
       isActive = false;
     };
   }, [
-    overview,
     profile?.is_super_admin,
-    selectedAccess,
+    selectedAccessAccountId,
+    selectedOverviewModalityId,
     selectedMembership?.membership.role,
   ]);
 
