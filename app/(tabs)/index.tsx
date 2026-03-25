@@ -3,6 +3,7 @@ import {
   ActivityIndicator,
   Alert,
   Modal,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -46,7 +47,8 @@ import {
 import {
   deleteManagedPlayerPhoto,
   isManagedPlayerPhotoUrl,
-  pickAndPreparePlayerPhoto,
+  pickAndPreparePlayerPhotoFromLibrary,
+  takeAndPreparePlayerPhoto,
   uploadPreparedPlayerPhoto,
   type PreparedPlayerPhoto,
 } from "@/src/lib/player-photos";
@@ -1508,9 +1510,37 @@ export default function HomeScreen() {
     );
   }
 
-  async function handlePickMembershipPhoto() {
+  function openPhotoSourcePicker(onLibrary: () => void, onCamera: () => void) {
+    if (Platform.OS === "web") {
+      onLibrary();
+      return;
+    }
+
+    Alert.alert("Foto do jogador", "Escolha como deseja definir a foto.", [
+      { text: "Cancelar", style: "cancel" },
+      { text: "Galeria", onPress: onLibrary },
+      { text: "Tirar foto", onPress: onCamera },
+    ]);
+  }
+
+  async function handlePickMembershipPhotoFromLibrary() {
     try {
-      const preparedPhoto = await pickAndPreparePlayerPhoto();
+      const preparedPhoto = await pickAndPreparePlayerPhotoFromLibrary();
+
+      if (!preparedPhoto) {
+        return;
+      }
+
+      setMembershipPreparedPhoto(preparedPhoto);
+      setMembershipPhotoTouched(true);
+    } catch (photoError) {
+      setMessage({ tone: "error", text: getReadableError(photoError) });
+    }
+  }
+
+  async function handleTakeMembershipPhoto() {
+    try {
+      const preparedPhoto = await takeAndPreparePlayerPhoto();
 
       if (!preparedPhoto) {
         return;
@@ -1529,9 +1559,24 @@ export default function HomeScreen() {
     setMembershipPhotoTouched(true);
   }
 
-  async function handlePickPlayerPhoto() {
+  async function handlePickPlayerPhotoFromLibrary() {
     try {
-      const preparedPhoto = await pickAndPreparePlayerPhoto();
+      const preparedPhoto = await pickAndPreparePlayerPhotoFromLibrary();
+
+      if (!preparedPhoto) {
+        return;
+      }
+
+      setPlayerPreparedPhoto(preparedPhoto);
+      setPlayerPhotoTouched(true);
+    } catch (photoError) {
+      setMessage({ tone: "error", text: getReadableError(photoError) });
+    }
+  }
+
+  async function handleTakePlayerPhoto() {
+    try {
+      const preparedPhoto = await takeAndPreparePlayerPhoto();
 
       if (!preparedPhoto) {
         return;
@@ -2326,9 +2371,14 @@ export default function HomeScreen() {
 
                         <PlayerPhotoField
                           label="Foto do jogador"
-                          hint="O BoraJogar abre o recorte quadrado no preview, reduz para 500x500 e salva uma versao leve."
+                          hint="Voce pode tirar a foto na hora ou escolher da galeria. O BoraJogar recorta no formato quadrado, reduz para 500x500 e salva uma versao leve."
                           previewUri={(membershipPreparedPhoto?.uri ?? membershipPhotoUrlDraft.trim()) || null}
-                          onPick={() => void handlePickMembershipPhoto()}
+                          onPick={() =>
+                            openPhotoSourcePicker(
+                              () => void handlePickMembershipPhotoFromLibrary(),
+                              () => void handleTakeMembershipPhoto(),
+                            )
+                          }
                           onClear={handleClearMembershipPhoto}
                           disabled={isSubmittingModal}
                         />
@@ -2470,9 +2520,14 @@ export default function HomeScreen() {
 
                       <PlayerPhotoField
                         label="Foto do jogador"
-                        hint="Use uma imagem quadrada ou recorte no preview. O upload salva uma versao 500x500."
+                        hint="Voce pode tirar a foto na hora ou escolher da galeria. O BoraJogar recorta no formato quadrado e salva uma versao 500x500."
                         previewUri={(playerPreparedPhoto?.uri ?? playerPhotoUrlDraft.trim()) || null}
-                        onPick={() => void handlePickPlayerPhoto()}
+                        onPick={() =>
+                          openPhotoSourcePicker(
+                            () => void handlePickPlayerPhotoFromLibrary(),
+                            () => void handleTakePlayerPhoto(),
+                          )
+                        }
                         onClear={handleClearPlayerPhoto}
                         disabled={isSubmittingModal}
                       />

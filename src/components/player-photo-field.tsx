@@ -40,7 +40,7 @@ export function PlayerPhotoField({
             disabled={disabled}
             style={[styles.secondaryButton, disabled && styles.disabledButton]}>
             <Text style={styles.secondaryButtonText}>
-              {previewUri ? "Trocar foto" : "Escolher foto"}
+              {previewUri ? "Trocar foto" : "Adicionar foto"}
             </Text>
           </Pressable>
           <Pressable

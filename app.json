@@ -2,7 +2,7 @@
   "expo": {
     "name": "BoraJogar",
     "slug": "borajogar",
-    "version": "1.0.1",
+    "version": "1.0.2",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "borajogar",
@@ -47,6 +47,7 @@
         "expo-image-picker",
         {
           "photosPermission": "O BoraJogar precisa acessar sua galeria para definir a foto do jogador.",
+          "cameraPermission": "O BoraJogar precisa acessar sua camera para tirar a foto do jogador.",
           "microphonePermission": false
         }
       ]

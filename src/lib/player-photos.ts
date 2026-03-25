@@ -17,6 +17,12 @@ export type PreparedPlayerPhoto = {
   height: number;
 };
 
+type PickerAsset = {
+  uri: string;
+  width: number;
+  height: number;
+};
+
 function buildSquareCrop(width: number, height: number) {
   if (width === height) {
     return null;
@@ -59,26 +65,7 @@ export function isManagedPlayerPhotoUrl(photoUrl: string | null | undefined) {
   return Boolean(extractManagedPhotoPath(photoUrl));
 }
 
-export async function pickAndPreparePlayerPhoto(): Promise<PreparedPlayerPhoto | null> {
-  const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
-
-  if (!permission.granted) {
-    throw new Error("Permita o acesso a galeria para escolher a foto do jogador.");
-  }
-
-  const result = await ImagePicker.launchImageLibraryAsync({
-    mediaTypes: ["images"],
-    allowsEditing: true,
-    aspect: [1, 1],
-    quality: 1,
-    exif: false,
-  });
-
-  if (result.canceled || !result.assets?.[0]) {
-    return null;
-  }
-
-  const asset = result.assets[0];
+async function preparePlayerPhotoAsset(asset: PickerAsset): Promise<PreparedPlayerPhoto> {
   const context = ImageManipulator.manipulate(asset.uri);
   const crop = buildSquareCrop(asset.width, asset.height);
 
@@ -109,6 +96,53 @@ export async function pickAndPreparePlayerPhoto(): Promise<PreparedPlayerPhoto |
     width: PLAYER_PHOTO_SIZE,
     height: PLAYER_PHOTO_SIZE,
   };
+}
+
+export async function pickAndPreparePlayerPhotoFromLibrary(): Promise<PreparedPlayerPhoto | null> {
+  const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+
+  if (!permission.granted) {
+    throw new Error("Permita o acesso a galeria para escolher a foto do jogador.");
+  }
+
+  const result = await ImagePicker.launchImageLibraryAsync({
+    mediaTypes: ["images"],
+    allowsEditing: true,
+    aspect: [1, 1],
+    quality: 1,
+    exif: false,
+  });
+
+  if (result.canceled || !result.assets?.[0]) {
+    return null;
+  }
+
+  return preparePlayerPhotoAsset(result.assets[0]);
+}
+
+export async function takeAndPreparePlayerPhoto(): Promise<PreparedPlayerPhoto | null> {
+  const permission = await ImagePicker.requestCameraPermissionsAsync();
+
+  if (!permission.granted) {
+    throw new Error("Permita o acesso a camera para tirar a foto do jogador.");
+  }
+
+  const result = await ImagePicker.launchCameraAsync({
+    allowsEditing: true,
+    aspect: [1, 1],
+    quality: 1,
+    exif: false,
+  });
+
+  if (result.canceled || !result.assets?.[0]) {
+    return null;
+  }
+
+  return preparePlayerPhotoAsset(result.assets[0]);
+}
+
+export async function pickAndPreparePlayerPhoto(): Promise<PreparedPlayerPhoto | null> {
+  return pickAndPreparePlayerPhotoFromLibrary();
 }
 
 export async function uploadPreparedPlayerPhoto(input: {
