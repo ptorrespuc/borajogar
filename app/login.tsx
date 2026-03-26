@@ -1,7 +1,8 @@
 import { Redirect } from "expo-router";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   ActivityIndicator,
+  Keyboard,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -24,6 +25,21 @@ export default function LoginScreen() {
   const [password, setPassword] = useState("");
   const [message, setMessage] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isKeyboardVisible, setIsKeyboardVisible] = useState(false);
+
+  useEffect(() => {
+    const showSubscription = Keyboard.addListener("keyboardDidShow", () => {
+      setIsKeyboardVisible(true);
+    });
+    const hideSubscription = Keyboard.addListener("keyboardDidHide", () => {
+      setIsKeyboardVisible(false);
+    });
+
+    return () => {
+      showSubscription.remove();
+      hideSubscription.remove();
+    };
+  }, []);
 
   if (session) {
     return <Redirect href="/" />;
@@ -76,34 +92,42 @@ export default function LoginScreen() {
     <SafeAreaView style={styles.safeArea}>
       <KeyboardAvoidingView
         style={styles.keyboardContainer}
-        behavior={Platform.OS === "ios" ? "padding" : undefined}>
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
+        keyboardVerticalOffset={Platform.OS === "ios" ? 0 : 18}>
         <ScrollView
-          contentContainerStyle={styles.scrollContent}
+          contentContainerStyle={[
+            styles.scrollContent,
+            isKeyboardVisible && styles.scrollContentKeyboardVisible,
+          ]}
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}>
-          <View style={styles.page}>
-            <View style={styles.heroCard}>
+          <View style={[styles.page, isKeyboardVisible && styles.pageWithKeyboard]}>
+            <View style={[styles.heroCard, isKeyboardVisible && styles.heroCardCompact]}>
               <View style={styles.heroGlowLarge} />
               <View style={styles.heroGlowSmall} />
 
               <Text style={styles.heroKicker}>BoraJogar</Text>
-              <Text style={styles.heroTitle}>Organize sua conta esportiva em um so lugar.</Text>
-              <Text style={styles.heroSubtitle}>
+              <Text style={[styles.heroTitle, isKeyboardVisible && styles.heroTitleCompact]}>
+                Organize sua conta esportiva em um so lugar.
+              </Text>
+              <Text style={[styles.heroSubtitle, isKeyboardVisible && styles.heroSubtitleCompact]}>
                 Controle jogadores, prioridades, presenca, enquetes e estatisticas do seu grupo com a identidade do
                 BoraJogar.
               </Text>
 
-              <View style={styles.heroPills}>
-                <View style={styles.heroPill}>
-                  <Text style={styles.heroPillText}>Contas esportivas</Text>
+              {!isKeyboardVisible ? (
+                <View style={styles.heroPills}>
+                  <View style={styles.heroPill}>
+                    <Text style={styles.heroPillText}>Contas esportivas</Text>
+                  </View>
+                  <View style={styles.heroPill}>
+                    <Text style={styles.heroPillText}>Presenca</Text>
+                  </View>
+                  <View style={styles.heroPill}>
+                    <Text style={styles.heroPillText}>Prioridades</Text>
+                  </View>
                 </View>
-                <View style={styles.heroPill}>
-                  <Text style={styles.heroPillText}>Presenca</Text>
-                </View>
-                <View style={styles.heroPill}>
-                  <Text style={styles.heroPillText}>Prioridades</Text>
-                </View>
-              </View>
+              ) : null}
             </View>
 
             <View style={styles.formCard}>
@@ -225,6 +249,9 @@ const styles = StyleSheet.create({
   scrollContent: {
     flexGrow: 1,
   },
+  scrollContentKeyboardVisible: {
+    paddingBottom: 24,
+  },
   page: {
     flexGrow: 1,
     padding: 20,
@@ -232,12 +259,21 @@ const styles = StyleSheet.create({
     gap: 18,
     backgroundColor: Colors.background,
   },
+  pageWithKeyboard: {
+    justifyContent: "flex-start",
+    paddingTop: 12,
+    gap: 12,
+  },
   heroCard: {
     overflow: "hidden",
     borderRadius: 30,
     backgroundColor: Colors.surfaceStrong,
     padding: 24,
     gap: 12,
+  },
+  heroCardCompact: {
+    paddingVertical: 18,
+    gap: 8,
   },
   heroGlowLarge: {
     position: "absolute",
@@ -271,11 +307,21 @@ const styles = StyleSheet.create({
     lineHeight: 36,
     maxWidth: 280,
   },
+  heroTitleCompact: {
+    fontSize: 24,
+    lineHeight: 30,
+    maxWidth: 240,
+  },
   heroSubtitle: {
     color: "#d5e2d9",
     fontSize: 15,
     lineHeight: 22,
     maxWidth: 300,
+  },
+  heroSubtitleCompact: {
+    fontSize: 13,
+    lineHeight: 19,
+    maxWidth: undefined,
   },
   heroPills: {
     flexDirection: "row",

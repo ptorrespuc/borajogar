@@ -2,8 +2,11 @@ import { useRouter } from "expo-router";
 import { useState } from "react";
 import {
   ActivityIndicator,
+  KeyboardAvoidingView,
+  Platform,
   Pressable,
   SafeAreaView,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -79,45 +82,55 @@ export default function ResetPasswordScreen() {
 
   return (
     <SafeAreaView style={styles.safeArea}>
-      <View style={styles.page}>
-        <View style={styles.card}>
-          <Text style={styles.title}>Nova senha</Text>
-          <Text style={styles.subtitle}>
-            Defina a senha da sua conta para concluir o acesso ao BoraJogar.
-          </Text>
+      <KeyboardAvoidingView
+        style={styles.keyboardContainer}
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
+        keyboardVerticalOffset={Platform.OS === "ios" ? 0 : 18}>
+        <ScrollView
+          contentContainerStyle={styles.scrollContent}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}>
+          <View style={styles.page}>
+            <View style={styles.card}>
+              <Text style={styles.title}>Nova senha</Text>
+              <Text style={styles.subtitle}>
+                Defina a senha da sua conta para concluir o acesso ao BoraJogar.
+              </Text>
 
-          <TextInput
-            value={password}
-            onChangeText={setPassword}
-            placeholder="Nova senha"
-            placeholderTextColor={Colors.textMuted}
-            secureTextEntry
-            style={styles.input}
-          />
+              <TextInput
+                value={password}
+                onChangeText={setPassword}
+                placeholder="Nova senha"
+                placeholderTextColor={Colors.textMuted}
+                secureTextEntry
+                style={styles.input}
+              />
 
-          <TextInput
-            value={confirmPassword}
-            onChangeText={setConfirmPassword}
-            placeholder="Confirme a nova senha"
-            placeholderTextColor={Colors.textMuted}
-            secureTextEntry
-            style={styles.input}
-          />
+              <TextInput
+                value={confirmPassword}
+                onChangeText={setConfirmPassword}
+                placeholder="Confirme a nova senha"
+                placeholderTextColor={Colors.textMuted}
+                secureTextEntry
+                style={styles.input}
+              />
 
-          {message ? <Text style={styles.message}>{message}</Text> : null}
+              {message ? <Text style={styles.message}>{message}</Text> : null}
 
-          <Pressable
-            onPress={() => void handleSubmit()}
-            disabled={isSubmitting}
-            style={[styles.primaryButton, isSubmitting && styles.buttonDisabled]}>
-            {isSubmitting ? (
-              <ActivityIndicator color="#ffffff" />
-            ) : (
-              <Text style={styles.primaryButtonText}>Salvar nova senha</Text>
-            )}
-          </Pressable>
-        </View>
-      </View>
+              <Pressable
+                onPress={() => void handleSubmit()}
+                disabled={isSubmitting}
+                style={[styles.primaryButton, isSubmitting && styles.buttonDisabled]}>
+                {isSubmitting ? (
+                  <ActivityIndicator color="#ffffff" />
+                ) : (
+                  <Text style={styles.primaryButtonText}>Salvar nova senha</Text>
+                )}
+              </Pressable>
+            </View>
+          </View>
+        </ScrollView>
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
@@ -139,6 +152,12 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     padding: 20,
     backgroundColor: Colors.background,
+  },
+  keyboardContainer: {
+    flex: 1,
+  },
+  scrollContent: {
+    flexGrow: 1,
   },
   card: {
     borderRadius: 26,

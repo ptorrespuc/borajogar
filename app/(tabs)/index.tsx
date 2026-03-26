@@ -3,6 +3,7 @@ import {
   ActivityIndicator,
   Alert,
   Image,
+  KeyboardAvoidingView,
   Modal,
   Platform,
   Pressable,
@@ -2860,22 +2861,28 @@ export default function HomeScreen() {
         transparent
         onRequestClose={closeAdminModal}>
         <View style={styles.modalBackdrop}>
-          <View style={styles.modalCard}>
-            <View style={styles.inlineHeader}>
-              <Text style={styles.modalTitle}>{title}</Text>
-              <Pressable onPress={closeAdminModal} style={styles.secondaryButton}>
-                <Text style={styles.secondaryButtonText}>Fechar</Text>
-              </Pressable>
-            </View>
-
-            {isModalLoading ? (
-              <View style={styles.modalLoading}>
-                <ActivityIndicator color={Colors.tint} />
-                <Text style={styles.panelText}>Carregando dados para edicao...</Text>
+          <KeyboardAvoidingView
+            behavior={Platform.OS === "ios" ? "padding" : "height"}
+            keyboardVerticalOffset={Platform.OS === "ios" ? 0 : 18}>
+            <View style={styles.modalCard}>
+              <View style={styles.inlineHeader}>
+                <Text style={styles.modalTitle}>{title}</Text>
+                <Pressable onPress={closeAdminModal} style={styles.secondaryButton}>
+                  <Text style={styles.secondaryButtonText}>Fechar</Text>
+                </Pressable>
               </View>
-            ) : (
-              <ScrollView contentContainerStyle={styles.modalContent}>
-                {isModalityModal ? (
+
+              {isModalLoading ? (
+                <View style={styles.modalLoading}>
+                  <ActivityIndicator color={Colors.tint} />
+                  <Text style={styles.panelText}>Carregando dados para edicao...</Text>
+                </View>
+              ) : (
+                <ScrollView
+                  contentContainerStyle={styles.modalContent}
+                  keyboardShouldPersistTaps="handled"
+                  showsVerticalScrollIndicator={false}>
+                  {isModalityModal ? (
                   <>
                     <View style={styles.formSection}>
                       <Text style={styles.formSectionTitle}>Dados da modalidade</Text>
@@ -3370,7 +3377,7 @@ export default function HomeScreen() {
                       )}
                     </Pressable>
                   </>
-                ) : isPollModal ? (
+                  ) : isPollModal ? (
                   <>
                     <View style={styles.formSection}>
                       <Text style={styles.formSectionTitle}>Modelo de enquete da conta</Text>
@@ -3431,7 +3438,7 @@ export default function HomeScreen() {
                       )}
                     </Pressable>
                   </>
-                ) : (
+                  ) : (
                   <>
                     <View style={styles.formSection}>
                       <Text style={styles.formSectionTitle}>Identificacao da conta</Text>
@@ -3666,10 +3673,11 @@ export default function HomeScreen() {
                       )}
                     </Pressable>
                   </>
-                )}
-              </ScrollView>
-            )}
-          </View>
+                  )}
+                </ScrollView>
+              )}
+            </View>
+          </KeyboardAvoidingView>
         </View>
       </Modal>
     );
@@ -3743,16 +3751,22 @@ export default function HomeScreen() {
     return (
       <Modal animationType="fade" visible transparent onRequestClose={closeEventPollModal}>
         <View style={styles.modalBackdrop}>
-          <View style={styles.modalCard}>
-            <View style={styles.inlineHeader}>
-              <Text style={styles.modalTitle}>Nova enquete do evento</Text>
-              <Pressable onPress={closeEventPollModal} style={styles.secondaryButton}>
-                <Text style={styles.secondaryButtonText}>Fechar</Text>
-              </Pressable>
-            </View>
+          <KeyboardAvoidingView
+            behavior={Platform.OS === "ios" ? "padding" : "height"}
+            keyboardVerticalOffset={Platform.OS === "ios" ? 0 : 18}>
+            <View style={styles.modalCard}>
+              <View style={styles.inlineHeader}>
+                <Text style={styles.modalTitle}>Nova enquete do evento</Text>
+                <Pressable onPress={closeEventPollModal} style={styles.secondaryButton}>
+                  <Text style={styles.secondaryButtonText}>Fechar</Text>
+                </Pressable>
+              </View>
 
-            <ScrollView contentContainerStyle={styles.modalContent} showsVerticalScrollIndicator={false}>
-              {!selectedEventPollSource ? (
+              <ScrollView
+                contentContainerStyle={styles.modalContent}
+                keyboardShouldPersistTaps="handled"
+                showsVerticalScrollIndicator={false}>
+                {!selectedEventPollSource ? (
                 <>
                   <View style={styles.formSection}>
                     <Text style={styles.formSectionTitle}>Escolha o tipo de enquete</Text>
@@ -4004,9 +4018,10 @@ export default function HomeScreen() {
                     )}
                   </Pressable>
                 </>
-              )}
-            </ScrollView>
-          </View>
+                )}
+              </ScrollView>
+            </View>
+          </KeyboardAvoidingView>
         </View>
       </Modal>
     );
@@ -4483,24 +4498,30 @@ export default function HomeScreen() {
     return (
       <Modal animationType="fade" visible transparent onRequestClose={closeMatchModal}>
         <View style={styles.modalBackdrop}>
-          <View style={styles.modalCard}>
-            <View style={styles.inlineHeader}>
-              <Text style={styles.modalTitle}>
-                {matchModal.mode === "create" ? "Nova partida" : "Editar partida"}
-              </Text>
-              <Pressable onPress={closeMatchModal} style={styles.secondaryButton}>
-                <Text style={styles.secondaryButtonText}>Fechar</Text>
-              </Pressable>
-            </View>
-
-            {isMatchModalLoading ? (
-              <View style={styles.modalLoading}>
-                <ActivityIndicator color={Colors.tint} />
-                <Text style={styles.panelText}>Carregando partida...</Text>
+          <KeyboardAvoidingView
+            behavior={Platform.OS === "ios" ? "padding" : "height"}
+            keyboardVerticalOffset={Platform.OS === "ios" ? 0 : 18}>
+            <View style={styles.modalCard}>
+              <View style={styles.inlineHeader}>
+                <Text style={styles.modalTitle}>
+                  {matchModal.mode === "create" ? "Nova partida" : "Editar partida"}
+                </Text>
+                <Pressable onPress={closeMatchModal} style={styles.secondaryButton}>
+                  <Text style={styles.secondaryButtonText}>Fechar</Text>
+                </Pressable>
               </View>
-            ) : (
-              <ScrollView contentContainerStyle={styles.modalContent}>
-                <View style={styles.formSection}>
+
+              {isMatchModalLoading ? (
+                <View style={styles.modalLoading}>
+                  <ActivityIndicator color={Colors.tint} />
+                  <Text style={styles.panelText}>Carregando partida...</Text>
+                </View>
+              ) : (
+                <ScrollView
+                  contentContainerStyle={styles.modalContent}
+                  keyboardShouldPersistTaps="handled"
+                  showsVerticalScrollIndicator={false}>
+                  <View style={styles.formSection}>
                   <Text style={styles.formSectionTitle}>Dados da partida</Text>
 
                   <View style={styles.fieldBlock}>
@@ -4648,9 +4669,10 @@ export default function HomeScreen() {
                     </Text>
                   )}
                 </Pressable>
-              </ScrollView>
-            )}
-          </View>
+                </ScrollView>
+              )}
+            </View>
+          </KeyboardAvoidingView>
         </View>
       </Modal>
     );
@@ -4892,7 +4914,11 @@ export default function HomeScreen() {
 
   return (
     <>
-      <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
+      <ScrollView
+        style={styles.screen}
+        contentContainerStyle={styles.content}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}>
         <View style={styles.hero}>
         <Text style={styles.kicker}>Conta conectada</Text>
         <Text style={styles.heroTitle}>{profile?.full_name || "Usuario autenticado"}</Text>
