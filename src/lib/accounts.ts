@@ -169,6 +169,22 @@ export type UpdatePollTemplateInput = {
   selectionMode: "predefined_options" | "event_participant";
 };
 
+export type EventPollOptionInput = {
+  label: string;
+  description: string | null;
+  targetParticipantId: string | null;
+};
+
+export type CreateEventPollInput = {
+  eventId: string;
+  templateId: string | null;
+  title: string;
+  description: string | null;
+  selectionMode: "predefined_options" | "event_participant";
+  createdBy: string;
+  options: EventPollOptionInput[];
+};
+
 export type CreateSportsAccountInput = {
   createdBy: string;
   name: string;
@@ -2160,6 +2176,94 @@ export async function closeWeeklyEventList(eventId: string) {
     .eq("id", eventId);
 
   throwIfError(error);
+}
+
+export async function createEventPoll(input: CreateEventPollInput) {
+  const normalizedTitle = input.title.trim();
+  const normalizedDescription = input.description?.trim() || null;
+  const normalizedOptions = input.options
+    .map((option) => ({
+      label: option.label.trim(),
+      description: option.description?.trim() || null,
+      targetParticipantId: option.targetParticipantId,
+    }))
+    .filter((option) => option.label.length > 0);
+
+  if (!normalizedTitle) {
+    throw new Error("Informe o titulo da enquete.");
+  }
+
+  if (input.selectionMode === "predefined_options" && normalizedOptions.length < 2) {
+    throw new Error("Cadastre pelo menos duas opcoes para a enquete fechada.");
+  }
+
+  const [{ data: eventData, error: eventError }, existingPolls] = await Promise.all([
+    supabase.from("events").select(eventSelectFields).eq("id", input.eventId).single(),
+    listEventPolls(input.eventId),
+  ]);
+
+  throwIfError(eventError);
+
+  const event = eventData as Event;
+
+  if (event.status !== "published") {
+    throw new Error("Feche a lista semanal antes de criar enquetes para o evento.");
+  }
+
+  if (
+    input.templateId &&
+    existingPolls.some((poll) => poll.template_id === input.templateId)
+  ) {
+    throw new Error("Essa enquete recorrente ja foi criada para este evento.");
+  }
+
+  const nextSortOrder =
+    existingPolls.length > 0
+      ? Math.max(...existingPolls.map((poll) => poll.sort_order)) + 1
+      : 1;
+  const now = new Date().toISOString();
+
+  const { data: pollData, error: pollError } = await supabase
+    .from("event_polls")
+    .insert({
+      event_id: input.eventId,
+      template_id: input.templateId,
+      title: normalizedTitle,
+      description: normalizedDescription,
+      selection_mode: input.selectionMode,
+      status: "open",
+      opens_at: now,
+      sort_order: nextSortOrder,
+      created_by: input.createdBy,
+    })
+    .select(eventPollSelectFields)
+    .single();
+
+  throwIfError(pollError);
+
+  const createdPoll = pollData as EventPoll;
+
+  if (input.selectionMode !== "predefined_options") {
+    return createdPoll;
+  }
+
+  const { error: optionError } = await supabase.from("event_poll_options").insert(
+    normalizedOptions.map((option, index) => ({
+      poll_id: createdPoll.id,
+      target_participant_id: option.targetParticipantId,
+      label: option.label,
+      description: option.description,
+      sort_order: index + 1,
+      created_by: input.createdBy,
+    })),
+  );
+
+  if (optionError) {
+    await supabase.from("event_polls").delete().eq("id", createdPoll.id);
+    throw new Error(optionError.message);
+  }
+
+  return createdPoll;
 }
 
 export async function createEventPollsFromTemplates(input: {

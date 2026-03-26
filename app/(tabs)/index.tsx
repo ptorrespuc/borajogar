@@ -28,7 +28,7 @@ import {
   completeWeeklyEvent,
   createAccountPlayer,
   createEventMatch,
-  createEventPollsFromTemplates,
+  createEventPoll,
   createSportModality,
   createSportsAccount,
   createWeeklyEventCall,
@@ -60,6 +60,7 @@ import {
   upsertAccountMembership,
   updateSportsAccountBasics,
   type AccountOverview,
+  type EventPollOptionInput,
   type EventMatchItem,
   type EventPollResultSummary,
   type WeeklyEventParticipantItem,
@@ -128,6 +129,7 @@ type PositionDraft = {
 
 let priorityGroupDraftCounter = 0;
 let positionDraftCounter = 0;
+let eventPollOptionDraftCounter = 0;
 
 type AccountAccessItem = {
   account: SportsAccount;
@@ -152,6 +154,22 @@ type AdminModalState =
       mode: "create" | "edit";
       targetId?: string;
     };
+
+type EventPollSourceChoice =
+  | {
+      kind: "template";
+      templateId: string;
+    }
+  | {
+      kind: "custom";
+    };
+
+type EventPollOptionDraft = {
+  id: string;
+  label: string;
+  description: string;
+  targetParticipantId: string | null;
+};
 
 function getReadableError(error: unknown) {
   if (error instanceof Error) {
@@ -211,6 +229,19 @@ function buildPositionDrafts(names: string[]) {
   }
 
   return normalizedNames.map((name) => createPositionDraft(name));
+}
+
+function createEventPollOptionDraft(
+  initial?: Partial<Pick<EventPollOptionDraft, "label" | "description" | "targetParticipantId">>,
+): EventPollOptionDraft {
+  eventPollOptionDraftCounter += 1;
+
+  return {
+    id: `event-poll-option-${eventPollOptionDraftCounter}`,
+    label: initial?.label ?? "",
+    description: initial?.description ?? "",
+    targetParticipantId: initial?.targetParticipantId ?? null,
+  };
 }
 
 function mapPriorityGroupsForSave(drafts: PriorityGroupDraft[]) {
@@ -425,6 +456,14 @@ export default function HomeScreen() {
   const [pollDescriptionDraft, setPollDescriptionDraft] = useState("");
   const [pollSelectionModeDraft, setPollSelectionModeDraft] =
     useState<PollSelectionMode>("event_participant");
+  const [isEventPollModalVisible, setIsEventPollModalVisible] = useState(false);
+  const [isSubmittingEventPoll, setIsSubmittingEventPoll] = useState(false);
+  const [selectedEventPollSource, setSelectedEventPollSource] = useState<EventPollSourceChoice | null>(null);
+  const [eventPollTitleDraft, setEventPollTitleDraft] = useState("");
+  const [eventPollDescriptionDraft, setEventPollDescriptionDraft] = useState("");
+  const [eventPollSelectionModeDraft, setEventPollSelectionModeDraft] =
+    useState<PollSelectionMode>("event_participant");
+  const [eventPollOptionDrafts, setEventPollOptionDrafts] = useState<EventPollOptionDraft[]>([]);
   const [matchModal, setMatchModal] = useState<null | { mode: "create" | "edit"; targetId?: string }>(null);
   const [isMatchModalLoading, setIsMatchModalLoading] = useState(false);
   const [isSubmittingMatch, setIsSubmittingMatch] = useState(false);
@@ -457,6 +496,21 @@ export default function HomeScreen() {
 
     setCreateModalitySlugDraft(slugify(createModalityNameDraft));
   }, [adminModal, createModalityNameDraft]);
+
+  useEffect(() => {
+    if (!isEventPollModalVisible) {
+      return;
+    }
+
+    if (eventPollSelectionModeDraft === "predefined_options") {
+      setEventPollOptionDrafts((current) =>
+        current.length >= 2 ? current : [createEventPollOptionDraft(), createEventPollOptionDraft()],
+      );
+      return;
+    }
+
+    setEventPollOptionDrafts([]);
+  }, [eventPollSelectionModeDraft, isEventPollModalVisible]);
 
   useEffect(() => {
     let isActive = true;
@@ -1051,6 +1105,83 @@ export default function HomeScreen() {
     setPollTitleDraft("");
     setPollDescriptionDraft("");
     setPollSelectionModeDraft("event_participant");
+  }
+
+  function resetEventPollForm() {
+    setSelectedEventPollSource(null);
+    setEventPollTitleDraft("");
+    setEventPollDescriptionDraft("");
+    setEventPollSelectionModeDraft("event_participant");
+    setEventPollOptionDrafts([]);
+  }
+
+  function closeEventPollModal() {
+    setIsEventPollModalVisible(false);
+    setIsSubmittingEventPoll(false);
+    resetEventPollForm();
+  }
+
+  function openCreateEventPollModal() {
+    if (!weeklyEvent || weeklyEvent.status !== "published") {
+      setMessage({ tone: "error", text: "Feche a lista da semana antes de criar enquetes." });
+      return;
+    }
+
+    resetEventPollForm();
+    setIsEventPollModalVisible(true);
+  }
+
+  function selectEventPollSource(source: EventPollSourceChoice) {
+    if (source.kind === "template") {
+      const template = accountPollTemplates.find((item) => item.id === source.templateId);
+
+      if (!template) {
+        setMessage({ tone: "error", text: "Nao foi possivel carregar o modelo de enquete escolhido." });
+        return;
+      }
+
+      setSelectedEventPollSource(source);
+      setEventPollTitleDraft(template.title);
+      setEventPollDescriptionDraft(template.description ?? "");
+      setEventPollSelectionModeDraft(template.selection_mode);
+      setEventPollOptionDrafts(
+        template.selection_mode === "predefined_options"
+          ? [createEventPollOptionDraft(), createEventPollOptionDraft()]
+          : [],
+      );
+      return;
+    }
+
+    setSelectedEventPollSource(source);
+    setEventPollTitleDraft("");
+    setEventPollDescriptionDraft("");
+    setEventPollSelectionModeDraft("event_participant");
+    setEventPollOptionDrafts([]);
+  }
+
+  function addEventPollOptionDraft() {
+    setEventPollOptionDrafts((current) => [...current, createEventPollOptionDraft()]);
+  }
+
+  function removeEventPollOptionDraft(optionId: string) {
+    setEventPollOptionDrafts((current) => current.filter((option) => option.id !== optionId));
+  }
+
+  function updateEventPollOptionDraft(
+    optionId: string,
+    field: keyof EventPollOptionDraft,
+    value: string | null,
+  ) {
+    setEventPollOptionDrafts((current) =>
+      current.map((option) =>
+        option.id === optionId
+          ? {
+              ...option,
+              [field]: value,
+            }
+          : option,
+      ),
+    );
   }
 
   function closeAdminModal() {
@@ -2191,27 +2322,54 @@ export default function HomeScreen() {
     }
   }
 
-  async function handleCreateEventPolls() {
+  function handleCreateEventPolls() {
     if (!selectedAccess || !weeklyEvent || !profile || !canManageWeeklyPolls) {
       return;
     }
 
-    setWeeklyActionId("polls");
+    setMessage(null);
+    openCreateEventPollModal();
+  }
+
+  async function handleSubmitEventPoll() {
+    if (!selectedAccess || !weeklyEvent || !profile || !canManageWeeklyPolls || !selectedEventPollSource) {
+      return;
+    }
+
+    setIsSubmittingEventPoll(true);
     setMessage(null);
 
     try {
-      await createEventPollsFromTemplates({
-        accountId: selectedAccess.account.id,
+      const options: EventPollOptionInput[] = eventPollOptionDrafts.map((option) => ({
+        label: option.label,
+        description: option.description || null,
+        targetParticipantId: option.targetParticipantId,
+      }));
+
+      await createEventPoll({
         eventId: weeklyEvent.id,
+        templateId:
+          selectedEventPollSource.kind === "template" ? selectedEventPollSource.templateId : null,
+        title: eventPollTitleDraft,
+        description: eventPollDescriptionDraft || null,
+        selectionMode: eventPollSelectionModeDraft,
         createdBy: profile.id,
+        options,
       });
 
       await reloadSelectedWorkspace();
-      setMessage({ tone: "success", text: "Enquetes do evento criadas a partir dos modelos da conta." });
+      closeEventPollModal();
+      setMessage({
+        tone: "success",
+        text:
+          selectedEventPollSource.kind === "template"
+            ? "Enquete do evento criada a partir do modelo selecionado."
+            : "Enquete avulsa criada para este evento.",
+      });
     } catch (actionError) {
       setMessage({ tone: "error", text: getReadableError(actionError) });
     } finally {
-      setWeeklyActionId(null);
+      setIsSubmittingEventPoll(false);
     }
   }
 
@@ -3540,6 +3698,9 @@ export default function HomeScreen() {
                   : "Preparada para o evento"}{" "}
               | {summary.totalVotes} voto(s)
             </Text>
+            <Text style={styles.fieldHint}>
+              {summary.poll.template_id ? "Modelo recorrente da conta" : "Enquete avulsa deste evento"}
+            </Text>
             {summary.poll.description ? (
               <Text style={styles.panelText}>{summary.poll.description}</Text>
             ) : null}
@@ -3566,6 +3727,288 @@ export default function HomeScreen() {
           </View>
         ))}
       </View>
+    );
+  }
+
+  function renderEventPollModal() {
+    if (!isEventPollModalVisible) {
+      return null;
+    }
+
+    const sourceModeLabel =
+      eventPollSelectionModeDraft === "predefined_options"
+        ? "Opcoes fechadas"
+        : "Qualquer jogador da lista";
+
+    return (
+      <Modal animationType="fade" visible transparent onRequestClose={closeEventPollModal}>
+        <View style={styles.modalBackdrop}>
+          <View style={styles.modalCard}>
+            <View style={styles.inlineHeader}>
+              <Text style={styles.modalTitle}>Nova enquete do evento</Text>
+              <Pressable onPress={closeEventPollModal} style={styles.secondaryButton}>
+                <Text style={styles.secondaryButtonText}>Fechar</Text>
+              </Pressable>
+            </View>
+
+            <ScrollView contentContainerStyle={styles.modalContent} showsVerticalScrollIndicator={false}>
+              {!selectedEventPollSource ? (
+                <>
+                  <View style={styles.formSection}>
+                    <Text style={styles.formSectionTitle}>Escolha o tipo de enquete</Text>
+                    <Text style={styles.fieldHint}>
+                      Os modelos da conta servem como linha do tempo para comparar resultados entre eventos.
+                      Se quiser algo pontual, crie uma enquete avulsa apenas para este evento.
+                    </Text>
+                  </View>
+
+                  <View style={styles.formSection}>
+                    <Text style={styles.formSectionTitle}>Modelos recorrentes da conta</Text>
+                    <Text style={styles.fieldHint}>
+                      Esses modelos ainda nao foram usados neste evento e podem virar uma nova enquete agora.
+                    </Text>
+
+                    {availableEventPollTemplates.length > 0 ? (
+                      availableEventPollTemplates.map((template) => (
+                        <Pressable
+                          key={template.id}
+                          onPress={() => selectEventPollSource({ kind: "template", templateId: template.id })}
+                          style={styles.selectionCard}>
+                          <Text style={styles.selectionCardTitle}>{template.title}</Text>
+                          <Text style={styles.selectionCardText}>
+                            {template.description || "Sem descricao cadastrada."}
+                          </Text>
+                          <Text style={styles.fieldHint}>
+                            Modo do modelo:{" "}
+                            {template.selection_mode === "predefined_options"
+                              ? "Opcoes fechadas"
+                              : "Qualquer jogador da lista"}
+                          </Text>
+                        </Pressable>
+                      ))
+                    ) : (
+                      <Text style={styles.panelText}>
+                        Todos os modelos recorrentes ja foram usados neste evento ou ainda nao ha modelos cadastrados.
+                      </Text>
+                    )}
+                  </View>
+
+                  <View style={styles.formSection}>
+                    <Text style={styles.formSectionTitle}>Enquete avulsa do evento</Text>
+                    <Text style={styles.fieldHint}>
+                      Use para lances, opinioes ou votacoes que fazem sentido apenas neste jogo.
+                    </Text>
+                    <Pressable
+                      onPress={() => selectEventPollSource({ kind: "custom" })}
+                      style={styles.selectionCard}>
+                      <Text style={styles.selectionCardTitle}>Criar enquete apenas para este evento</Text>
+                      <Text style={styles.selectionCardText}>
+                        Voce define titulo, descricao, modo de votacao e, se quiser, opcoes fechadas.
+                      </Text>
+                    </Pressable>
+                  </View>
+                </>
+              ) : (
+                <>
+                  <View style={styles.formSection}>
+                    <View style={styles.inlineHeader}>
+                      <View style={styles.inlineHeaderContent}>
+                        <Text style={styles.formSectionTitle}>Origem da enquete</Text>
+                        <Text style={styles.fieldHint}>
+                          {selectedEventPollSource.kind === "template"
+                            ? `Baseada no modelo ${selectedEventPollTemplate?.title ?? "selecionado"}.`
+                            : "Enquete criada apenas para este evento."}
+                        </Text>
+                      </View>
+                      <Pressable
+                        onPress={resetEventPollForm}
+                        disabled={isSubmittingEventPoll}
+                        style={[styles.secondaryButton, isSubmittingEventPoll && styles.buttonDisabled]}>
+                        <Text style={styles.secondaryButtonText}>Trocar</Text>
+                      </Pressable>
+                    </View>
+                    <Text style={styles.fieldHint}>Modo atual: {sourceModeLabel}</Text>
+                  </View>
+
+                  <View style={styles.formSection}>
+                    <Text style={styles.formSectionTitle}>Identificacao da enquete</Text>
+
+                    <View style={styles.fieldBlock}>
+                      <Text style={styles.label}>Titulo</Text>
+                      <TextInput
+                        value={eventPollTitleDraft}
+                        onChangeText={setEventPollTitleDraft}
+                        placeholder="Melhor jogador da rodada"
+                        placeholderTextColor={Colors.textMuted}
+                        style={styles.input}
+                      />
+                    </View>
+
+                    <View style={styles.fieldBlock}>
+                      <Text style={styles.label}>Descricao</Text>
+                      <TextInput
+                        value={eventPollDescriptionDraft}
+                        onChangeText={setEventPollDescriptionDraft}
+                        placeholder="Explique o objetivo dessa enquete no contexto do evento"
+                        placeholderTextColor={Colors.textMuted}
+                        style={[styles.input, styles.multiline]}
+                        multiline
+                      />
+                    </View>
+
+                    {selectedEventPollSource.kind === "custom" ? (
+                      <View style={styles.fieldBlock}>
+                        <Text style={styles.label}>Modo de votacao</Text>
+                        {pollModeOptions.map((option) => (
+                          <Pressable
+                            key={option.value}
+                            onPress={() => setEventPollSelectionModeDraft(option.value)}
+                            style={[
+                              styles.selectionCard,
+                              eventPollSelectionModeDraft === option.value && styles.selectionCardActive,
+                            ]}>
+                            <Text style={styles.selectionCardTitle}>{option.label}</Text>
+                            <Text style={styles.selectionCardText}>{option.description}</Text>
+                          </Pressable>
+                        ))}
+                      </View>
+                    ) : (
+                      <Text style={styles.fieldHint}>
+                        O modo de votacao foi herdado do modelo da conta e permanece fixo para esta enquete.
+                      </Text>
+                    )}
+                  </View>
+
+                  {eventPollSelectionModeDraft === "predefined_options" ? (
+                    <View style={styles.formSection}>
+                      <View style={styles.inlineHeader}>
+                        <View style={styles.inlineHeaderContent}>
+                          <Text style={styles.formSectionTitle}>Opcoes fechadas da enquete</Text>
+                          <Text style={styles.fieldHint}>
+                            Cada opcao pode apontar para um jogador da lista ou ficar sem jogador associado.
+                          </Text>
+                        </View>
+                        <Pressable
+                          onPress={addEventPollOptionDraft}
+                          disabled={isSubmittingEventPoll}
+                          style={[styles.secondaryButton, isSubmittingEventPoll && styles.buttonDisabled]}>
+                          <Text style={styles.secondaryButtonText}>Adicionar</Text>
+                        </Pressable>
+                      </View>
+
+                      {eventPollOptionDrafts.map((option, index) => (
+                        <View key={option.id} style={styles.priorityEditorCard}>
+                          <View style={styles.priorityEditorHeader}>
+                            <Text style={styles.priorityEditorTitle}>Opcao {index + 1}</Text>
+                            <Pressable
+                              onPress={() => removeEventPollOptionDraft(option.id)}
+                              disabled={eventPollOptionDrafts.length <= 2 || isSubmittingEventPoll}
+                              style={[
+                                styles.inlineDangerButton,
+                                (eventPollOptionDrafts.length <= 2 || isSubmittingEventPoll) &&
+                                  styles.buttonDisabled,
+                              ]}>
+                              <Text style={styles.inlineDangerText}>
+                                {eventPollOptionDrafts.length <= 2 ? "Minimo 2" : "Excluir"}
+                              </Text>
+                            </Pressable>
+                          </View>
+
+                          <View style={styles.fieldBlock}>
+                            <Text style={styles.label}>Titulo da opcao</Text>
+                            <TextInput
+                              value={option.label}
+                              onChangeText={(value) => updateEventPollOptionDraft(option.id, "label", value)}
+                              placeholder="Golaco do segundo tempo"
+                              placeholderTextColor={Colors.textMuted}
+                              style={styles.input}
+                            />
+                          </View>
+
+                          <View style={styles.fieldBlock}>
+                            <Text style={styles.label}>Descricao opcional</Text>
+                            <TextInput
+                              value={option.description}
+                              onChangeText={(value) =>
+                                updateEventPollOptionDraft(option.id, "description", value)
+                              }
+                              placeholder="Explique o lance ou detalhe da opcao"
+                              placeholderTextColor={Colors.textMuted}
+                              style={[styles.input, styles.multiline]}
+                              multiline
+                            />
+                          </View>
+
+                          <View style={styles.fieldBlock}>
+                            <Text style={styles.label}>Associar a um jogador</Text>
+                            <Text style={styles.fieldHint}>
+                              Use quando a opcao representar um lance de um jogador especifico.
+                            </Text>
+                            <View style={styles.chips}>
+                              <Pressable
+                                onPress={() =>
+                                  updateEventPollOptionDraft(option.id, "targetParticipantId", null)
+                                }
+                                style={[
+                                  styles.chip,
+                                  option.targetParticipantId === null && styles.chipSelected,
+                                ]}>
+                                <Text
+                                  style={[
+                                    styles.chipText,
+                                    option.targetParticipantId === null && styles.chipTextSelected,
+                                  ]}>
+                                  Sem jogador
+                                </Text>
+                              </Pressable>
+                              {activeWeeklyParticipants.map((participantItem) => (
+                                <Pressable
+                                  key={`${option.id}-${participantItem.participant.id}`}
+                                  onPress={() =>
+                                    updateEventPollOptionDraft(
+                                      option.id,
+                                      "targetParticipantId",
+                                      participantItem.participant.id,
+                                    )
+                                  }
+                                  style={[
+                                    styles.chip,
+                                    option.targetParticipantId === participantItem.participant.id &&
+                                      styles.chipSelected,
+                                  ]}>
+                                  <Text
+                                    style={[
+                                      styles.chipText,
+                                      option.targetParticipantId === participantItem.participant.id &&
+                                        styles.chipTextSelected,
+                                    ]}>
+                                    {participantItem.player.full_name}
+                                  </Text>
+                                </Pressable>
+                              ))}
+                            </View>
+                          </View>
+                        </View>
+                      ))}
+                    </View>
+                  ) : null}
+
+                  <Pressable
+                    onPress={() => void handleSubmitEventPoll()}
+                    disabled={isSubmittingEventPoll}
+                    style={[styles.primaryButton, isSubmittingEventPoll && styles.buttonDisabled]}>
+                    {isSubmittingEventPoll ? (
+                      <ActivityIndicator color="#ffffff" />
+                    ) : (
+                      <Text style={styles.primaryButtonText}>Criar enquete do evento</Text>
+                    )}
+                  </Pressable>
+                </>
+              )}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
     );
   }
 
@@ -3802,18 +4245,13 @@ export default function HomeScreen() {
                 <View style={styles.listActions}>
                   {canManageWeeklyPolls ? (
                     <Pressable
-                      onPress={() => void handleCreateEventPolls()}
-                      disabled={weeklyActionId === "polls" || weeklyEventPolls.length > 0}
+                      onPress={handleCreateEventPolls}
                       style={[
                         styles.inlineActionButton,
-                        (weeklyActionId === "polls" || weeklyEventPolls.length > 0) && styles.buttonDisabled,
+                        isEventPollModalVisible && styles.buttonDisabled,
                       ]}>
                       <Text style={styles.inlineActionText}>
-                        {weeklyEventPolls.length > 0
-                          ? "Enquetes criadas"
-                          : weeklyActionId === "polls"
-                            ? "Criando..."
-                            : "Criar enquetes"}
+                        {weeklyEventPolls.length > 0 ? "Nova enquete" : "Criar enquete"}
                       </Text>
                     </Pressable>
                   ) : null}
@@ -4342,7 +4780,7 @@ export default function HomeScreen() {
               <View style={styles.inlineHeaderContent}>
                 <Text style={styles.workspaceTitle}>Enquetes da conta</Text>
                 <Text style={styles.panelText}>
-                  Modele as enquetes recorrentes para reutilizar quando os eventos reais entrarem no fluxo.
+                  Cadastre aqui os modelos recorrentes da conta. Em cada evento, voce escolhe quais modelos usar e pode criar enquetes avulsas quando necessario.
                 </Text>
               </View>
               <Pressable onPress={openCreatePollModal} style={styles.secondaryButton}>
@@ -4439,6 +4877,18 @@ export default function HomeScreen() {
 
       return first.player.full_name.localeCompare(second.player.full_name);
     });
+  const usedTemplateIds = new Set(
+    weeklyEventPolls
+      .map((poll) => poll.template_id)
+      .filter((templateId): templateId is string => Boolean(templateId)),
+  );
+  const availableEventPollTemplates = accountPollTemplates.filter(
+    (template) => !usedTemplateIds.has(template.id),
+  );
+  const selectedEventPollTemplate =
+    selectedEventPollSource?.kind === "template"
+      ? accountPollTemplates.find((template) => template.id === selectedEventPollSource.templateId) ?? null
+      : null;
 
   return (
     <>
@@ -4599,6 +5049,7 @@ export default function HomeScreen() {
         ) : null}
       </ScrollView>
       {renderAdminModal()}
+      {renderEventPollModal()}
       {renderMatchModal()}
     </>
   );
