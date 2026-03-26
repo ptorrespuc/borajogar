@@ -192,8 +192,7 @@ export default function ElencoScreen() {
       <View style={styles.header}>
         <Text style={styles.title}>Elenco e cadastro do jogador</Text>
         <Text style={styles.subtitle}>
-          Esta etapa troca o mock por memberships reais e libera a edicao do proprio nome e das
-          posicoes favoritas em ordem de preferencia.
+          Consulte o elenco ativo da conta e mantenha atualizado o cadastro esportivo de cada jogador.
         </Text>
       </View>
 

@@ -85,6 +85,13 @@ export type EventPollResultSummary = {
   entries: EventPollResultEntry[];
 };
 
+export type EventTimelineItem = {
+  event: Event;
+  participants: WeeklyEventParticipantItem[];
+  pollResults: EventPollResultSummary[];
+  matches: EventMatchItem[];
+};
+
 export type EventMatchTeamLineup = {
   team: EventMatchTeam;
   players: AccountPlayer[];
@@ -1299,6 +1306,47 @@ export async function getLatestWeeklyEvent(accountId: string): Promise<Event | n
 
   throwIfError(error);
   return (data as Event | null) ?? null;
+}
+
+export async function listEventsForAccount(accountId: string): Promise<Event[]> {
+  const { data, error } = await supabase
+    .from("events")
+    .select(eventSelectFields)
+    .eq("account_id", accountId)
+    .in("status", ["draft", "published", "completed", "cancelled"])
+    .order("starts_at", { ascending: false })
+    .order("created_at", { ascending: false });
+
+  throwIfError(error);
+  return (data ?? []) as Event[];
+}
+
+export async function listAccountEventTimeline(
+  accountId: string,
+  modalityId: string,
+): Promise<EventTimelineItem[]> {
+  const events = await listEventsForAccount(accountId);
+
+  if (events.length === 0) {
+    return [];
+  }
+
+  return Promise.all(
+    events.map(async (event) => {
+      const [participants, pollResults, matches] = await Promise.all([
+        listWeeklyEventParticipants(event.id, modalityId),
+        listEventPollResults(event.id),
+        listEventMatches(event.id),
+      ]);
+
+      return {
+        event,
+        participants,
+        pollResults,
+        matches,
+      } satisfies EventTimelineItem;
+    }),
+  );
 }
 
 export async function listWeeklyEventParticipants(

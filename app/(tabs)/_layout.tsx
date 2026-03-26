@@ -69,9 +69,9 @@ export default function TabLayout() {
       <Tabs.Screen
         name="index"
         options={{
-          title: 'Inicio',
-          headerTitle: 'BoraJogar',
-          tabBarIcon: ({ color }) => <TabBarIcon name="home" color={color} />,
+          title: 'Eventos',
+          headerTitle: 'Eventos',
+          tabBarIcon: ({ color }) => <TabBarIcon name="calendar" color={color} />,
           headerRight: () => (
             <Link href="/modal" asChild>
               <Pressable>
@@ -91,14 +91,16 @@ export default function TabLayout() {
       <Tabs.Screen
         name="agenda"
         options={{
-          title: 'Agenda',
-          tabBarIcon: ({ color }) => <TabBarIcon name="calendar" color={color} />,
+          title: 'Configuracao',
+          headerTitle: 'Configuracao',
+          tabBarIcon: ({ color }) => <TabBarIcon name="sliders" color={color} />,
         }}
       />
       <Tabs.Screen
         name="elenco"
         options={{
           title: 'Elenco',
+          headerTitle: 'Elenco',
           tabBarIcon: ({ color }) => <TabBarIcon name="users" color={color} />,
         }}
       />
