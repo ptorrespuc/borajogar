@@ -4688,12 +4688,12 @@ export default function HomeScreen() {
         <View style={styles.inlineHeader}>
           <View style={styles.inlineHeaderContent}>
             <Text style={styles.panelTitle}>
-              {isSuperAdmin ? "Gestao da conta esportiva" : "Operacao principal da conta"}
+              {isSuperAdmin ? "Gestao da conta esportiva" : "Configuracao da conta esportiva"}
             </Text>
             <Text style={styles.panelText}>
               {isSuperAdmin
-                ? "Edicao da conta fica separada. Aqui voce administra jogadores, enquetes recorrentes e a chamada semanal do jogo."
-                : "A chamada semanal fica em destaque. As demais configuracoes do grupo aparecem separadas abaixo."}
+                ? "Edicao da conta fica separada. Aqui voce administra jogadores e modelos recorrentes da conta."
+                : "A operacao do evento atual agora fica na aba Eventos. Esta tela concentra apenas os cadastros e configuracoes do grupo."}
             </Text>
           </View>
           {canManageAccount ? (
@@ -4705,13 +4705,6 @@ export default function HomeScreen() {
 
         {canManageAccount ? (
           <View style={styles.tabRow}>
-            <Pressable
-              onPress={() => setWorkspaceTab("weekly")}
-              style={[styles.tabButton, workspaceTab === "weekly" && styles.tabButtonActive]}>
-              <Text style={[styles.tabText, workspaceTab === "weekly" && styles.tabTextActive]}>
-                Lista semanal
-              </Text>
-            </Pressable>
             <Pressable
               onPress={() => setWorkspaceTab("players")}
               style={[styles.tabButton, workspaceTab === "players" && styles.tabButtonActive]}>
@@ -4735,7 +4728,12 @@ export default function HomeScreen() {
             <Text style={styles.panelText}>Carregando gestao da conta...</Text>
           </View>
         ) : !canManageAccount ? (
-          renderWeeklyWorkspace()
+          <View style={styles.listCard}>
+            <Text style={styles.workspaceTitle}>Use a aba Eventos</Text>
+            <Text style={styles.panelText}>
+              A chamada semanal, as enquetes do evento e as partidas agora ficam centralizadas na aba Eventos.
+            </Text>
+          </View>
         ) : workspaceTab === "players" ? (
           <>
             <View style={styles.inlineHeader}>
@@ -4796,7 +4794,7 @@ export default function HomeScreen() {
               </Text>
             )}
           </>
-        ) : workspaceTab === "polls" ? (
+        ) : (
           <>
             <View style={styles.inlineHeader}>
               <View style={styles.inlineHeaderContent}>
@@ -4852,8 +4850,6 @@ export default function HomeScreen() {
               </Text>
             )}
           </>
-        ) : (
-          renderWeeklyWorkspace()
         )}
       </View>
     );

@@ -85,6 +85,21 @@ export type EventPollResultSummary = {
   entries: EventPollResultEntry[];
 };
 
+export type EventPollBallotOption = {
+  id: string;
+  optionId: string | null;
+  targetParticipantId: string | null;
+  label: string;
+  description: string | null;
+  photoUrl: string | null;
+};
+
+export type EventPollBallot = {
+  poll: EventPoll;
+  options: EventPollBallotOption[];
+  currentVote: EventPollVote | null;
+};
+
 export type EventTimelineItem = {
   event: Event;
   participants: WeeklyEventParticipantItem[];
@@ -190,6 +205,13 @@ export type CreateEventPollInput = {
   selectionMode: "predefined_options" | "event_participant";
   createdBy: string;
   options: EventPollOptionInput[];
+};
+
+export type UpsertEventPollVoteInput = {
+  pollId: string;
+  voterParticipantId: string;
+  optionId: string | null;
+  targetParticipantId: string | null;
 };
 
 export type CreateSportsAccountInput = {
@@ -1701,6 +1723,201 @@ export async function listEventPollResults(eventId: string): Promise<EventPollRe
       entries,
     } satisfies EventPollResultSummary;
   });
+}
+
+export async function listEventPollBallots(input: {
+  eventId: string;
+  modalityId: string;
+  voterParticipantId?: string | null;
+}): Promise<EventPollBallot[]> {
+  const polls = await listEventPolls(input.eventId);
+
+  if (polls.length === 0) {
+    return [];
+  }
+
+  const predefinedPollIds = polls
+    .filter((poll) => poll.selection_mode === "predefined_options")
+    .map((poll) => poll.id);
+  const [participants, optionData, voteData] = await Promise.all([
+    listWeeklyEventParticipants(input.eventId, input.modalityId),
+    predefinedPollIds.length > 0
+      ? supabase
+          .from("event_poll_options")
+          .select(
+            "id, poll_id, target_participant_id, label, description, sort_order, created_by, created_at, updated_at",
+          )
+          .in("poll_id", predefinedPollIds)
+          .order("sort_order", { ascending: true })
+          .order("created_at", { ascending: true })
+      : Promise.resolve({
+          data: [] as EventPollOption[],
+          error: null as { message: string } | null,
+        }),
+    input.voterParticipantId
+      ? supabase
+          .from("event_poll_votes")
+          .select("id, poll_id, voter_participant_id, option_id, target_participant_id, created_at")
+          .eq("voter_participant_id", input.voterParticipantId)
+          .in(
+            "poll_id",
+            polls.map((poll) => poll.id),
+          )
+      : Promise.resolve({
+          data: [] as EventPollVote[],
+          error: null as { message: string } | null,
+        }),
+  ]);
+
+  throwIfError(optionData.error);
+  throwIfError(voteData.error);
+
+  const options = (optionData.data ?? []) as EventPollOption[];
+  const currentVotes = new Map(
+    ((voteData.data ?? []) as EventPollVote[]).map((vote) => [vote.poll_id, vote]),
+  );
+  const participantMap = new Map(participants.map((participant) => [participant.participant.id, participant]));
+  const activeParticipants = participants.filter(
+    (participant) => participant.participant.selection_status === "active",
+  );
+
+  return polls.map((poll) => {
+    if (poll.selection_mode === "predefined_options") {
+      return {
+        poll,
+        currentVote: currentVotes.get(poll.id) ?? null,
+        options: options
+          .filter((option) => option.poll_id === poll.id)
+          .map((option) => {
+            const linkedParticipant = option.target_participant_id
+              ? participantMap.get(option.target_participant_id) ?? null
+              : null;
+
+            return {
+              id: option.id,
+              optionId: option.id,
+              targetParticipantId: option.target_participant_id,
+              label: option.label,
+              description: option.description ?? null,
+              photoUrl: linkedParticipant?.player.photo_url ?? null,
+            } satisfies EventPollBallotOption;
+          }),
+      } satisfies EventPollBallot;
+    }
+
+    return {
+      poll,
+      currentVote: currentVotes.get(poll.id) ?? null,
+      options: activeParticipants.map((participant) => ({
+        id: participant.participant.id,
+        optionId: null,
+        targetParticipantId: participant.participant.id,
+        label: participant.player.full_name,
+        description:
+          participant.preferredPositions.length > 0
+            ? participant.preferredPositions.map((position) => position.name).join(", ")
+            : participant.priorityGroup?.name ?? null,
+        photoUrl: participant.player.photo_url ?? null,
+      })),
+    } satisfies EventPollBallot;
+  });
+}
+
+export async function upsertEventPollVote(input: UpsertEventPollVoteInput) {
+  const { data: pollData, error: pollError } = await supabase
+    .from("event_polls")
+    .select(eventPollSelectFields)
+    .eq("id", input.pollId)
+    .single();
+
+  throwIfError(pollError);
+
+  const poll = pollData as EventPoll;
+
+  if (poll.status !== "open") {
+    throw new Error("Essa enquete nao esta mais aberta para voto.");
+  }
+
+  let optionId: string | null = null;
+  let targetParticipantId: string | null = null;
+
+  if (poll.selection_mode === "predefined_options") {
+    if (!input.optionId) {
+      throw new Error("Escolha uma opcao da enquete.");
+    }
+
+    const { data: optionData, error: optionError } = await supabase
+      .from("event_poll_options")
+      .select(
+        "id, poll_id, target_participant_id, label, description, sort_order, created_by, created_at, updated_at",
+      )
+      .eq("id", input.optionId)
+      .single();
+
+    throwIfError(optionError);
+
+    const option = optionData as EventPollOption;
+
+    if (option.poll_id !== poll.id) {
+      throw new Error("A opcao escolhida nao pertence a essa enquete.");
+    }
+
+    optionId = option.id;
+    targetParticipantId = option.target_participant_id ?? null;
+  } else {
+    if (!input.targetParticipantId) {
+      throw new Error("Escolha um jogador para votar.");
+    }
+
+    const { data: participantData, error: participantError } = await supabase
+      .from("event_participants")
+      .select("id, event_id")
+      .eq("id", input.targetParticipantId)
+      .single();
+
+    throwIfError(participantError);
+
+    if (!participantData) {
+      throw new Error("O jogador escolhido nao pertence a esse evento.");
+    }
+
+    if (participantData.event_id !== poll.event_id) {
+      throw new Error("O jogador escolhido nao pertence a esse evento.");
+    }
+
+    targetParticipantId = input.targetParticipantId;
+  }
+
+  const { data: existingVoteData, error: existingVoteError } = await supabase
+    .from("event_poll_votes")
+    .select("id, poll_id, voter_participant_id, option_id, target_participant_id, created_at")
+    .eq("poll_id", poll.id)
+    .eq("voter_participant_id", input.voterParticipantId)
+    .maybeSingle();
+
+  throwIfError(existingVoteError);
+
+  if (existingVoteData) {
+    const { error: updateError } = await supabase
+      .from("event_poll_votes")
+      .update({
+        option_id: optionId,
+        target_participant_id: targetParticipantId,
+      })
+      .eq("id", existingVoteData.id);
+
+    throwIfError(updateError);
+    return;
+  }
+
+  const { error: insertError } = await supabase.from("event_poll_votes").insert({
+    poll_id: poll.id,
+    voter_participant_id: input.voterParticipantId,
+    option_id: optionId,
+    target_participant_id: targetParticipantId,
+  });
+
+  throwIfError(insertError);
 }
 
 async function replaceEventMatchTeamPlayers(teamId: string, orderedPlayerIds: string[]) {
