@@ -2180,6 +2180,10 @@ export async function closeWeeklyEventList(eventId: string) {
 
 export async function createEventPoll(input: CreateEventPollInput) {
   const normalizedTitle = input.title.trim();
+  const normalizedTitleKey = normalizedTitle
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
   const normalizedDescription = input.description?.trim() || null;
   const normalizedOptions = input.options
     .map((option) => ({
@@ -2215,6 +2219,19 @@ export async function createEventPoll(input: CreateEventPollInput) {
     existingPolls.some((poll) => poll.template_id === input.templateId)
   ) {
     throw new Error("Essa enquete recorrente ja foi criada para este evento.");
+  }
+
+  if (
+    existingPolls.some(
+      (poll) =>
+        poll.title
+          .trim()
+          .normalize("NFD")
+          .replace(/[\u0300-\u036f]/g, "")
+          .toLowerCase() === normalizedTitleKey,
+    )
+  ) {
+    throw new Error("Ja existe uma enquete com esse titulo neste evento.");
   }
 
   const nextSortOrder =
