@@ -199,6 +199,107 @@ function PlayerAvatar({
   );
 }
 
+function getBalanceRating(value: number | null) {
+  return typeof value === "number" ? value : 5;
+}
+
+function formatPlayerRating(value: number | null) {
+  return value === null ? "Sem nota" : value.toFixed(2);
+}
+
+function calculateTeamRating(
+  playerIds: string[],
+  participants: WeeklyEventParticipantItem[],
+) {
+  const participantMap = new Map(participants.map((item) => [item.player.id, item]));
+
+  return Number(
+    playerIds
+      .reduce((total, playerId) => total + getBalanceRating(participantMap.get(playerId)?.player.rating ?? null), 0)
+      .toFixed(2),
+  );
+}
+
+function balanceMatchTeams(
+  selectedPlayerIds: string[],
+  participants: WeeklyEventParticipantItem[],
+) {
+  const participantMap = new Map(
+    participants.map((item, index) => [
+      item.player.id,
+      {
+        item,
+        order: index,
+      },
+    ]),
+  );
+
+  const candidates = [...new Set(selectedPlayerIds)]
+    .map((playerId) => {
+      const participant = participantMap.get(playerId);
+
+      if (!participant) {
+        return null;
+      }
+
+      return {
+        id: playerId,
+        order: participant.order,
+        rating: getBalanceRating(participant.item.player.rating),
+      };
+    })
+    .filter(
+      (
+        item,
+      ): item is {
+        id: string;
+        order: number;
+        rating: number;
+      } => item !== null,
+    )
+    .sort((first, second) => {
+      if (second.rating !== first.rating) {
+        return second.rating - first.rating;
+      }
+
+      return first.order - second.order;
+    });
+
+  const homeTarget = Math.ceil(candidates.length / 2);
+  const awayTarget = Math.floor(candidates.length / 2);
+  const homeTeam: typeof candidates = [];
+  const awayTeam: typeof candidates = [];
+  let homeRating = 0;
+  let awayRating = 0;
+
+  for (const candidate of candidates) {
+    const shouldUseHome =
+      awayTeam.length >= awayTarget
+        ? true
+        : homeTeam.length >= homeTarget
+          ? false
+          : homeRating === awayRating
+            ? homeTeam.length <= awayTeam.length
+            : homeRating < awayRating;
+
+    if (shouldUseHome) {
+      homeTeam.push(candidate);
+      homeRating += candidate.rating;
+      continue;
+    }
+
+    awayTeam.push(candidate);
+    awayRating += candidate.rating;
+  }
+
+  return {
+    homePlayerIds: homeTeam.sort((first, second) => first.order - second.order).map((item) => item.id),
+    awayPlayerIds: awayTeam.sort((first, second) => first.order - second.order).map((item) => item.id),
+    homeRating: Number(homeRating.toFixed(2)),
+    awayRating: Number(awayRating.toFixed(2)),
+  };
+}
+
 export default function EventsScreen() {
   const router = useRouter();
   const { profile, memberships } = useAuth();
@@ -232,6 +333,7 @@ export default function EventsScreen() {
   const [matchAwayTeamNameDraft, setMatchAwayTeamNameDraft] = useState("Time B");
   const [matchHomeScoreDraft, setMatchHomeScoreDraft] = useState("0");
   const [matchAwayScoreDraft, setMatchAwayScoreDraft] = useState("0");
+  const [matchSelectedPlayerIds, setMatchSelectedPlayerIds] = useState<string[]>([]);
   const [matchHomePlayerIds, setMatchHomePlayerIds] = useState<string[]>([]);
   const [matchAwayPlayerIds, setMatchAwayPlayerIds] = useState<string[]>([]);
 
@@ -748,6 +850,7 @@ export default function EventsScreen() {
     setMatchAwayTeamNameDraft("Time B");
     setMatchHomeScoreDraft("0");
     setMatchAwayScoreDraft("0");
+    setMatchSelectedPlayerIds([]);
     setMatchHomePlayerIds([]);
     setMatchAwayPlayerIds([]);
   }
@@ -763,12 +866,20 @@ export default function EventsScreen() {
   }
 
   function openEditMatchModal(matchItem: EventMatchItem) {
+    const selectedPlayerIds = [
+      ...new Set([
+        ...(matchItem.homeTeam?.players.map((player) => player.id) ?? []),
+        ...(matchItem.awayTeam?.players.map((player) => player.id) ?? []),
+      ]),
+    ];
+
     setMatchModal({ mode: "edit", targetId: matchItem.match.id });
     setMatchTitleDraft(matchItem.match.title);
     setMatchHomeTeamNameDraft(matchItem.homeTeam?.team.name ?? "Time A");
     setMatchAwayTeamNameDraft(matchItem.awayTeam?.team.name ?? "Time B");
     setMatchHomeScoreDraft(String(matchItem.homeTeam?.team.score ?? 0));
     setMatchAwayScoreDraft(String(matchItem.awayTeam?.team.score ?? 0));
+    setMatchSelectedPlayerIds(selectedPlayerIds);
     setMatchHomePlayerIds(matchItem.homeTeam?.players.map((player) => player.id) ?? []);
     setMatchAwayPlayerIds(matchItem.awayTeam?.players.map((player) => player.id) ?? []);
   }
@@ -779,25 +890,42 @@ export default function EventsScreen() {
     resetMatchForm();
   }
 
+  function toggleMatchSelectedPlayer(playerId: string) {
+    const isSelected = matchSelectedPlayerIds.includes(playerId);
+
+    if (isSelected) {
+      setMatchSelectedPlayerIds((currentValue) => currentValue.filter((id) => id !== playerId));
+      setMatchHomePlayerIds((currentValue) => currentValue.filter((id) => id !== playerId));
+      setMatchAwayPlayerIds((currentValue) => currentValue.filter((id) => id !== playerId));
+      return;
+    }
+
+    setMatchSelectedPlayerIds((currentValue) => [...currentValue, playerId]);
+  }
+
   function toggleMatchPlayer(side: "home" | "away", playerId: string) {
+    if (!matchSelectedPlayerIds.includes(playerId)) {
+      setMatchSelectedPlayerIds((currentValue) => [...currentValue, playerId]);
+    }
+
     if (side === "home") {
       if (matchHomePlayerIds.includes(playerId)) {
-        setMatchHomePlayerIds(matchHomePlayerIds.filter((id) => id !== playerId));
+        setMatchHomePlayerIds((currentValue) => currentValue.filter((id) => id !== playerId));
         return;
       }
 
-      setMatchHomePlayerIds([...matchHomePlayerIds, playerId]);
-      setMatchAwayPlayerIds(matchAwayPlayerIds.filter((id) => id !== playerId));
+      setMatchHomePlayerIds((currentValue) => [...currentValue.filter((id) => id !== playerId), playerId]);
+      setMatchAwayPlayerIds((currentValue) => currentValue.filter((id) => id !== playerId));
       return;
     }
 
     if (matchAwayPlayerIds.includes(playerId)) {
-      setMatchAwayPlayerIds(matchAwayPlayerIds.filter((id) => id !== playerId));
+      setMatchAwayPlayerIds((currentValue) => currentValue.filter((id) => id !== playerId));
       return;
     }
 
-    setMatchAwayPlayerIds([...matchAwayPlayerIds, playerId]);
-    setMatchHomePlayerIds(matchHomePlayerIds.filter((id) => id !== playerId));
+    setMatchAwayPlayerIds((currentValue) => [...currentValue.filter((id) => id !== playerId), playerId]);
+    setMatchHomePlayerIds((currentValue) => currentValue.filter((id) => id !== playerId));
   }
 
   function copyExistingTeamToMatchDraft(side: "home" | "away", sourceTeamId: string) {
@@ -814,13 +942,39 @@ export default function EventsScreen() {
     if (side === "home") {
       setMatchHomeTeamNameDraft(sourceTeam.team.name);
       setMatchHomePlayerIds(sourceIds);
-      setMatchAwayPlayerIds(matchAwayPlayerIds.filter((id) => !sourceIds.includes(id)));
+      setMatchAwayPlayerIds((currentValue) => currentValue.filter((id) => !sourceIds.includes(id)));
+      setMatchSelectedPlayerIds((currentValue) => [
+        ...new Set([...currentValue.filter((id) => !sourceIds.includes(id)), ...sourceIds]),
+      ]);
       return;
     }
 
     setMatchAwayTeamNameDraft(sourceTeam.team.name);
     setMatchAwayPlayerIds(sourceIds);
-    setMatchHomePlayerIds(matchHomePlayerIds.filter((id) => !sourceIds.includes(id)));
+    setMatchHomePlayerIds((currentValue) => currentValue.filter((id) => !sourceIds.includes(id)));
+    setMatchSelectedPlayerIds((currentValue) => [
+      ...new Set([...currentValue.filter((id) => !sourceIds.includes(id)), ...sourceIds]),
+    ]);
+  }
+
+  function handleBalanceSelectedPlayers() {
+    const selectedIds = [...new Set(matchSelectedPlayerIds)];
+
+    if (selectedIds.length < 2) {
+      setMessage({
+        tone: "error",
+        text: "Selecione pelo menos 2 jogadores para balancear os times.",
+      });
+      return;
+    }
+
+    const balancedTeams = balanceMatchTeams(selectedIds, activeParticipants);
+    setMatchHomePlayerIds(balancedTeams.homePlayerIds);
+    setMatchAwayPlayerIds(balancedTeams.awayPlayerIds);
+    setMessage({
+      tone: "success",
+      text: `Times balanceados pela nota: ${balancedTeams.homeRating.toFixed(2)} x ${balancedTeams.awayRating.toFixed(2)}.`,
+    });
   }
 
   async function handleSaveMatch() {
@@ -830,9 +984,35 @@ export default function EventsScreen() {
 
     const homeScore = Number(matchHomeScoreDraft);
     const awayScore = Number(matchAwayScoreDraft);
+    const selectedIds = [...new Set(matchSelectedPlayerIds)];
+    const assignedIds = [...new Set([...matchHomePlayerIds, ...matchAwayPlayerIds])];
 
     if (!matchTitleDraft.trim()) {
       setMessage({ tone: "error", text: "Informe um titulo para a partida." });
+      return;
+    }
+
+    if (selectedIds.length < 2) {
+      setMessage({
+        tone: "error",
+        text: "Selecione os jogadores que entram nessa partida antes de salvar.",
+      });
+      return;
+    }
+
+    if (matchHomePlayerIds.length === 0 || matchAwayPlayerIds.length === 0) {
+      setMessage({
+        tone: "error",
+        text: "Distribua os jogadores selecionados entre os dois times.",
+      });
+      return;
+    }
+
+    if (assignedIds.length !== selectedIds.length) {
+      setMessage({
+        tone: "error",
+        text: "Todos os jogadores selecionados precisam estar alocados em um dos dois times.",
+      });
       return;
     }
 
@@ -1101,7 +1281,11 @@ export default function EventsScreen() {
     );
   }
 
-  function renderMatchesSection(matches: EventMatchItem[], allowManage: boolean) {
+  function renderMatchesSection(
+    matches: EventMatchItem[],
+    participants: WeeklyEventParticipantItem[],
+    allowManage: boolean,
+  ) {
     return (
       <View style={styles.sectionCard}>
         <View style={styles.inlineHeader}>
@@ -1151,14 +1335,21 @@ export default function EventsScreen() {
                 ) : null}
               </View>
 
-              <View style={styles.matchTeams}>
-                <View style={styles.selectionCard}>
-                  <Text style={styles.selectionCardTitle}>{matchItem.homeTeam?.team.name ?? "Time A"}</Text>
-                  {(matchItem.homeTeam?.players ?? []).length > 0 ? (
-                    (matchItem.homeTeam?.players ?? []).map((player) => (
-                      <View key={`${matchItem.match.id}-home-${player.id}`} style={styles.matchPlayerRow}>
-                        <PlayerAvatar name={player.full_name} photoUrl={player.photo_url} size={30} />
-                        <Text style={styles.selectionCardText}>{player.full_name}</Text>
+                <View style={styles.matchTeams}>
+                  <View style={styles.selectionCard}>
+                    <Text style={styles.selectionCardTitle}>{matchItem.homeTeam?.team.name ?? "Time A"}</Text>
+                    <Text style={styles.selectionCardText}>
+                      Nota total{" "}
+                      {calculateTeamRating(
+                        (matchItem.homeTeam?.players ?? []).map((player) => player.id),
+                        participants,
+                      ).toFixed(2)}
+                    </Text>
+                    {(matchItem.homeTeam?.players ?? []).length > 0 ? (
+                      (matchItem.homeTeam?.players ?? []).map((player) => (
+                        <View key={`${matchItem.match.id}-home-${player.id}`} style={styles.matchPlayerRow}>
+                          <PlayerAvatar name={player.full_name} photoUrl={player.photo_url} size={30} />
+                          <Text style={styles.selectionCardText}>{player.full_name}</Text>
                       </View>
                     ))
                   ) : (
@@ -1168,6 +1359,13 @@ export default function EventsScreen() {
 
                 <View style={styles.selectionCard}>
                   <Text style={styles.selectionCardTitle}>{matchItem.awayTeam?.team.name ?? "Time B"}</Text>
+                  <Text style={styles.selectionCardText}>
+                    Nota total{" "}
+                    {calculateTeamRating(
+                      (matchItem.awayTeam?.players ?? []).map((player) => player.id),
+                      participants,
+                    ).toFixed(2)}
+                  </Text>
                   {(matchItem.awayTeam?.players ?? []).length > 0 ? (
                     (matchItem.awayTeam?.players ?? []).map((player) => (
                       <View key={`${matchItem.match.id}-away-${player.id}`} style={styles.matchPlayerRow}>
@@ -1458,6 +1656,7 @@ export default function EventsScreen() {
 
               {renderMatchesSection(
                 activeEventItem.matches,
+                activeEventItem.participants,
                 activeEventItem.event.status === "published" && canManageWeeklyPolls,
               )}
             </>
@@ -1535,7 +1734,7 @@ export default function EventsScreen() {
               )}
             </View>
 
-            {renderMatchesSection(item.matches, false)}
+            {renderMatchesSection(item.matches, item.participants, false)}
           </View>
         ) : null}
       </View>
@@ -1774,6 +1973,15 @@ export default function EventsScreen() {
         item.awayTeam ? { id: item.awayTeam.team.id, label: `${item.match.title} | ${item.awayTeam.team.name}` } : null,
       ])
       .filter((item): item is { id: string; label: string } => item !== null);
+    const selectedParticipants = activeParticipants.filter((item) =>
+      matchSelectedPlayerIds.includes(item.player.id),
+    );
+    const unassignedSelectedCount = selectedParticipants.filter(
+      (item) =>
+        !matchHomePlayerIds.includes(item.player.id) && !matchAwayPlayerIds.includes(item.player.id),
+    ).length;
+    const homeTeamRating = calculateTeamRating(matchHomePlayerIds, activeParticipants);
+    const awayTeamRating = calculateTeamRating(matchAwayPlayerIds, activeParticipants);
 
     return (
       <Modal animationType="fade" visible transparent onRequestClose={closeMatchModal}>
@@ -1806,8 +2014,90 @@ export default function EventsScreen() {
                 </View>
 
                 <View style={styles.formSection}>
+                  <Text style={styles.formSectionTitle}>Jogadores desta partida</Text>
+                  <Text style={styles.fieldHint}>
+                    Marque quem entrou nesse jogo antes de dividir os times. Jogadores sem nota contam como 5,00 no balanceamento automatico.
+                  </Text>
+
+                  <View style={styles.listActions}>
+                    <Pressable
+                      onPress={() => {
+                        const allPlayerIds = activeParticipants.map((item) => item.player.id);
+                        setMatchSelectedPlayerIds(allPlayerIds);
+                      }}
+                      style={styles.secondaryButton}>
+                      <Text style={styles.secondaryButtonText}>Usar quorum inteiro</Text>
+                    </Pressable>
+                    <Pressable
+                      onPress={() => {
+                        setMatchSelectedPlayerIds([]);
+                        setMatchHomePlayerIds([]);
+                        setMatchAwayPlayerIds([]);
+                      }}
+                      style={styles.secondaryButton}>
+                      <Text style={styles.secondaryButtonText}>Limpar selecao</Text>
+                    </Pressable>
+                    <Pressable
+                      onPress={handleBalanceSelectedPlayers}
+                      disabled={matchSelectedPlayerIds.length < 2}
+                      style={[styles.secondaryButton, matchSelectedPlayerIds.length < 2 && styles.buttonDisabled]}>
+                      <Text style={styles.secondaryButtonText}>Balancear por nota</Text>
+                    </Pressable>
+                  </View>
+
+                  <Text style={styles.selectionSummary}>
+                    Selecionados: {selectedParticipants.length} | {matchHomeTeamNameDraft.trim() || "Time A"}:{" "}
+                    {matchHomePlayerIds.length} ({homeTeamRating.toFixed(2)}) |{" "}
+                    {matchAwayTeamNameDraft.trim() || "Time B"}: {matchAwayPlayerIds.length} ({awayTeamRating.toFixed(2)})
+                  </Text>
+                  <Text style={styles.fieldHint}>
+                    {unassignedSelectedCount > 0
+                      ? `${unassignedSelectedCount} jogador(es) selecionado(s) ainda sem time.`
+                      : "Todos os selecionados ja estao alocados em um time."}
+                  </Text>
+
+                  <View style={styles.selectionList}>
+                    {activeParticipants.map((item) => {
+                      const isSelected = matchSelectedPlayerIds.includes(item.player.id);
+                      const teamLabel = matchHomePlayerIds.includes(item.player.id)
+                        ? matchHomeTeamNameDraft.trim() || "Time A"
+                        : matchAwayPlayerIds.includes(item.player.id)
+                          ? matchAwayTeamNameDraft.trim() || "Time B"
+                          : "Ainda sem time";
+
+                      return (
+                        <Pressable
+                          key={`selected-player-${item.player.id}`}
+                          onPress={() => toggleMatchSelectedPlayer(item.player.id)}
+                          style={[styles.playerPickerCard, isSelected && styles.playerPickerCardSelected]}>
+                          <View style={styles.rowWithAvatar}>
+                            <PlayerAvatar name={item.player.full_name} photoUrl={item.player.photo_url} size={38} />
+                            <View style={styles.flex}>
+                              <Text style={styles.playerPickerTitle}>{item.player.full_name}</Text>
+                              <Text style={styles.playerPickerMeta}>
+                                Nota {formatPlayerRating(item.player.rating)} |{" "}
+                                {item.priorityGroup
+                                  ? `${item.priorityGroup.priority_rank}. ${item.priorityGroup.name}`
+                                  : "Sem prioridade"}
+                              </Text>
+                              <Text style={styles.playerPickerMeta}>{teamLabel}</Text>
+                            </View>
+                          </View>
+                        </Pressable>
+                      );
+                    })}
+                  </View>
+                </View>
+
+                <View style={styles.formSection}>
                   <Text style={styles.formSectionTitle}>Time A</Text>
+                  <Text style={styles.fieldHint}>
+                    Monte o time com base apenas nos jogadores selecionados para essa partida.
+                  </Text>
                   <TextInput value={matchHomeTeamNameDraft} onChangeText={setMatchHomeTeamNameDraft} style={styles.input} />
+                  <Text style={styles.selectionSummary}>
+                    {matchHomePlayerIds.length} jogador(es) | Nota total {homeTeamRating.toFixed(2)}
+                  </Text>
                   {sourceTeams.length > 0 ? (
                     <View style={styles.chips}>
                       {sourceTeams.map((team) => (
@@ -1817,21 +2107,31 @@ export default function EventsScreen() {
                       ))}
                     </View>
                   ) : null}
-                  <View style={styles.chips}>
-                    {activeParticipants.map((item) => {
+                  {selectedParticipants.length > 0 ? (
+                    <View style={styles.chips}>
+                      {selectedParticipants.map((item) => {
                       const isSelected = matchHomePlayerIds.includes(item.player.id);
                       return (
                         <Pressable key={`home-${item.player.id}`} onPress={() => toggleMatchPlayer("home", item.player.id)} style={[styles.chip, isSelected && styles.chipSelected]}>
                           <Text style={[styles.chipText, isSelected && styles.chipTextSelected]}>{item.player.full_name}</Text>
                         </Pressable>
                       );
-                    })}
-                  </View>
+                      })}
+                    </View>
+                  ) : (
+                    <Text style={styles.panelText}>Selecione antes os jogadores que vao entrar nessa partida.</Text>
+                  )}
                 </View>
 
                 <View style={styles.formSection}>
                   <Text style={styles.formSectionTitle}>Time B</Text>
+                  <Text style={styles.fieldHint}>
+                    Ajuste o segundo time depois de marcar quem participa e, se quiser, usar o balanceamento automatico.
+                  </Text>
                   <TextInput value={matchAwayTeamNameDraft} onChangeText={setMatchAwayTeamNameDraft} style={styles.input} />
+                  <Text style={styles.selectionSummary}>
+                    {matchAwayPlayerIds.length} jogador(es) | Nota total {awayTeamRating.toFixed(2)}
+                  </Text>
                   {sourceTeams.length > 0 ? (
                     <View style={styles.chips}>
                       {sourceTeams.map((team) => (
@@ -1841,16 +2141,20 @@ export default function EventsScreen() {
                       ))}
                     </View>
                   ) : null}
-                  <View style={styles.chips}>
-                    {activeParticipants.map((item) => {
+                  {selectedParticipants.length > 0 ? (
+                    <View style={styles.chips}>
+                      {selectedParticipants.map((item) => {
                       const isSelected = matchAwayPlayerIds.includes(item.player.id);
                       return (
                         <Pressable key={`away-${item.player.id}`} onPress={() => toggleMatchPlayer("away", item.player.id)} style={[styles.chip, isSelected && styles.chipSelected]}>
                           <Text style={[styles.chipText, isSelected && styles.chipTextSelected]}>{item.player.full_name}</Text>
                         </Pressable>
                       );
-                    })}
-                  </View>
+                      })}
+                    </View>
+                  ) : (
+                    <Text style={styles.panelText}>Selecione antes os jogadores que vao entrar nessa partida.</Text>
+                  )}
                 </View>
 
                 <Pressable onPress={() => void handleSaveMatch()} disabled={isSubmittingMatch} style={[styles.primaryButton, isSubmittingMatch && styles.buttonDisabled]}>
@@ -2045,9 +2349,16 @@ const styles = StyleSheet.create({
   formSection: { gap: 14 },
   formSectionTitle: { color: Colors.text, fontSize: 18, fontWeight: "800" },
   fieldBlock: { gap: 8 },
+  fieldHint: { color: Colors.textMuted, fontSize: 13, lineHeight: 19 },
   label: { color: Colors.text, fontSize: 14, fontWeight: "700" },
   input: { borderRadius: 18, borderWidth: 1, borderColor: "#d5dfd1", backgroundColor: "#f8faf5", paddingHorizontal: 16, paddingVertical: 14, color: Colors.text, fontSize: 16 },
   multilineInput: { minHeight: 96, textAlignVertical: "top" },
+  selectionSummary: { color: Colors.tint, fontSize: 13, fontWeight: "800" },
+  selectionList: { gap: 10 },
+  playerPickerCard: { borderRadius: 18, borderWidth: 1, borderColor: "#dfe7d8", backgroundColor: "#f8faf5", padding: 14 },
+  playerPickerCardSelected: { borderColor: Colors.tint, backgroundColor: "#e8f4ea" },
+  playerPickerTitle: { color: Colors.text, fontSize: 15, fontWeight: "800" },
+  playerPickerMeta: { color: Colors.textMuted, fontSize: 13, lineHeight: 18 },
   optionCard: { borderRadius: 20, borderWidth: 1, borderColor: "#dfe7d8", backgroundColor: "#f8faf5", padding: 14, gap: 12 },
   linkDanger: { color: "#a24335", fontWeight: "800" },
   row: { flexDirection: "row", gap: 12 },
