@@ -259,6 +259,55 @@ function parsePositions(value: string) {
   return [...new Set(value.split(",").map((item) => item.trim()).filter(Boolean))];
 }
 
+function parseOptionalPlayerAge(value: string) {
+  const trimmed = value.trim();
+
+  if (!trimmed) {
+    return null;
+  }
+
+  if (!/^\d+$/.test(trimmed)) {
+    throw new Error("A idade deve ser um numero inteiro.");
+  }
+
+  const age = Number(trimmed);
+
+  if (age < 0 || age > 120) {
+    throw new Error("A idade deve ficar entre 0 e 120 anos.");
+  }
+
+  return age;
+}
+
+function parseOptionalPlayerRating(value: string) {
+  const trimmed = value.trim().replace(",", ".");
+
+  if (!trimmed) {
+    return null;
+  }
+
+  if (!/^\d{1,2}(?:\.\d{1,2})?$/.test(trimmed)) {
+    throw new Error("A nota deve ficar entre 0 e 10, com ate 2 casas decimais.");
+  }
+
+  const rating = Number(trimmed);
+
+  if (Number.isNaN(rating) || rating < 0 || rating > 10) {
+    throw new Error("A nota deve ficar entre 0 e 10, com ate 2 casas decimais.");
+  }
+
+  return Number(rating.toFixed(2));
+}
+
+function normalizeOptionalNotes(value: string) {
+  const trimmed = value.trim();
+  return trimmed ? trimmed : null;
+}
+
+function formatPlayerRating(value: number | null) {
+  return value === null ? "Sem nota" : value.toFixed(2);
+}
+
 function formatSchedule(weekday: number, startsAt: string, endsAt: string) {
   return `${weekdayLabels[weekday] ?? "Dia"} | ${startsAt.slice(0, 5)} as ${endsAt.slice(0, 5)}`;
 }
@@ -437,6 +486,9 @@ export default function HomeScreen() {
   const [membershipPriorityGroupModalId, setMembershipPriorityGroupModalId] = useState<string | null>(null);
   const [membershipProfileIdDraft, setMembershipProfileIdDraft] = useState<string | null>(null);
   const [membershipPreferredPositionIds, setMembershipPreferredPositionIds] = useState<string[]>([]);
+  const [membershipAgeDraft, setMembershipAgeDraft] = useState("");
+  const [membershipRatingDraft, setMembershipRatingDraft] = useState("");
+  const [membershipNotesDraft, setMembershipNotesDraft] = useState("");
   const [membershipWeeklyDefaultDraft, setMembershipWeeklyDefaultDraft] = useState(true);
   const [membershipPriorityOptions, setMembershipPriorityOptions] = useState<Array<{
     id: string;
@@ -452,6 +504,9 @@ export default function HomeScreen() {
   const [playerPhotoTouched, setPlayerPhotoTouched] = useState(false);
   const [playerPriorityGroupDraftId, setPlayerPriorityGroupDraftId] = useState<string | null>(null);
   const [playerPreferredPositionIds, setPlayerPreferredPositionIds] = useState<string[]>([]);
+  const [playerAgeDraft, setPlayerAgeDraft] = useState("");
+  const [playerRatingDraft, setPlayerRatingDraft] = useState("");
+  const [playerNotesDraft, setPlayerNotesDraft] = useState("");
   const [playerWeeklyDefaultDraft, setPlayerWeeklyDefaultDraft] = useState(true);
   const [pollTitleDraft, setPollTitleDraft] = useState("");
   const [pollDescriptionDraft, setPollDescriptionDraft] = useState("");
@@ -1084,6 +1139,9 @@ export default function HomeScreen() {
     setMembershipLinkedPlayerIdDraft(null);
     setMembershipProfileIdDraft(null);
     setMembershipPreferredPositionIds([]);
+    setMembershipAgeDraft("");
+    setMembershipRatingDraft("");
+    setMembershipNotesDraft("");
     setMembershipWeeklyDefaultDraft(true);
     setMembershipPriorityOptions([]);
     setMembershipPositionOptions([]);
@@ -1099,6 +1157,9 @@ export default function HomeScreen() {
     setPlayerPhotoTouched(false);
     setPlayerPriorityGroupDraftId(overview?.priorityGroups[0]?.id ?? null);
     setPlayerPreferredPositionIds([]);
+    setPlayerAgeDraft("");
+    setPlayerRatingDraft("");
+    setPlayerNotesDraft("");
     setPlayerWeeklyDefaultDraft(true);
   }
 
@@ -1316,6 +1377,13 @@ export default function HomeScreen() {
       setMembershipPreferredPositionIds(
         linkedPlayer?.preferredPositions.map((position) => position.id) ?? [],
       );
+      setMembershipAgeDraft(linkedPlayer?.player.age !== null && linkedPlayer?.player.age !== undefined ? String(linkedPlayer.player.age) : "");
+      setMembershipRatingDraft(
+        linkedPlayer?.player.rating !== null && linkedPlayer?.player.rating !== undefined
+          ? linkedPlayer.player.rating.toFixed(2)
+          : "",
+      );
+      setMembershipNotesDraft(linkedPlayer?.player.notes ?? "");
       setMembershipWeeklyDefaultDraft(linkedPlayer?.player.is_default_for_weekly_list ?? true);
       setMembershipPositionOptions(positions);
     } catch (loadError) {
@@ -1352,6 +1420,9 @@ export default function HomeScreen() {
     setPlayerPhotoTouched(false);
     setPlayerPriorityGroupDraftId(item.player.priority_group_id ?? overview.priorityGroups[0]?.id ?? null);
     setPlayerPreferredPositionIds(item.preferredPositions.map((position) => position.id));
+    setPlayerAgeDraft(item.player.age !== null ? String(item.player.age) : "");
+    setPlayerRatingDraft(item.player.rating !== null ? item.player.rating.toFixed(2) : "");
+    setPlayerNotesDraft(item.player.notes ?? "");
     setPlayerWeeklyDefaultDraft(item.player.is_default_for_weekly_list);
     setAdminModal({
       type: "player",
@@ -1701,6 +1772,11 @@ export default function HomeScreen() {
       let accountPlayerId: string | null = null;
       let profileLabel = membershipEmailDraft.trim().toLowerCase();
       const normalizedEmail = membershipEmailDraft.trim().toLowerCase();
+      const playerAge = membershipActsAsPlayerDraft ? parseOptionalPlayerAge(membershipAgeDraft) : null;
+      const playerRating = membershipActsAsPlayerDraft
+        ? parseOptionalPlayerRating(membershipRatingDraft)
+        : null;
+      const playerNotes = membershipActsAsPlayerDraft ? normalizeOptionalNotes(membershipNotesDraft) : null;
       let invitedAccess = false;
       let manualActionLink: string | null = null;
 
@@ -1737,6 +1813,9 @@ export default function HomeScreen() {
           fullName: membershipNameDraft.trim(),
           email: normalizedEmail,
           photoUrl: desiredPhotoUrl,
+          age: playerAge,
+          rating: playerRating,
+          notes: playerNotes,
           linkedProfileId: profileId,
           priorityGroupId: membershipPriorityGroupModalId,
           isDefaultForWeeklyList: membershipWeeklyDefaultDraft,
@@ -1757,6 +1836,9 @@ export default function HomeScreen() {
             fullName: membershipNameDraft.trim(),
             email: normalizedEmail,
             photoUrl: uploadedPhotoUrl,
+            age: playerAge,
+            rating: playerRating,
+            notes: playerNotes,
             linkedProfileId: profileId,
             priorityGroupId: membershipPriorityGroupModalId,
             isDefaultForWeeklyList: membershipWeeklyDefaultDraft,
@@ -1976,6 +2058,9 @@ export default function HomeScreen() {
 
     try {
       const normalizedPlayerEmail = playerEmailDraft.trim().toLowerCase();
+      const playerAge = parseOptionalPlayerAge(playerAgeDraft);
+      const playerRating = parseOptionalPlayerRating(playerRatingDraft);
+      const playerNotes = normalizeOptionalNotes(playerNotesDraft);
       let linkedProfileId = await resolveLinkedProfileId(normalizedPlayerEmail);
       let invitedAccess = false;
       let manualActionLink: string | null = null;
@@ -2001,6 +2086,9 @@ export default function HomeScreen() {
           fullName: playerNameDraft.trim(),
           email: normalizedPlayerEmail,
           photoUrl: desiredPhotoUrl,
+          age: playerAge,
+          rating: playerRating,
+          notes: playerNotes,
           linkedProfileId,
           priorityGroupId: playerPriorityGroupDraftId,
           isDefaultForWeeklyList: playerWeeklyDefaultDraft,
@@ -2013,6 +2101,9 @@ export default function HomeScreen() {
           fullName: playerNameDraft.trim(),
           email: normalizedPlayerEmail,
           photoUrl: desiredPhotoUrl,
+          age: playerAge,
+          rating: playerRating,
+          notes: playerNotes,
           linkedProfileId,
           priorityGroupId: playerPriorityGroupDraftId,
           isDefaultForWeeklyList: playerWeeklyDefaultDraft,
@@ -2035,6 +2126,9 @@ export default function HomeScreen() {
           fullName: playerNameDraft.trim(),
           email: normalizedPlayerEmail,
           photoUrl: uploadedPhotoUrl,
+          age: playerAge,
+          rating: playerRating,
+          notes: playerNotes,
           linkedProfileId,
           priorityGroupId: playerPriorityGroupDraftId,
           isDefaultForWeeklyList: playerWeeklyDefaultDraft,
@@ -2205,6 +2299,9 @@ export default function HomeScreen() {
         fullName: item.player.full_name,
         email: item.player.email,
         photoUrl: item.player.photo_url,
+        age: item.player.age,
+        rating: item.player.rating,
+        notes: item.player.notes,
         linkedProfileId: item.player.linked_profile_id,
         priorityGroupId: item.player.priority_group_id,
         isDefaultForWeeklyList: nextValue,
@@ -3139,6 +3236,48 @@ export default function HomeScreen() {
                           disabled={isSubmittingModal}
                         />
 
+                        <View style={styles.row}>
+                          <View style={[styles.fieldBlock, styles.flex]}>
+                            <Text style={styles.label}>Idade</Text>
+                            <Text style={styles.fieldHint}>Opcional. Informe em anos.</Text>
+                            <TextInput
+                              value={membershipAgeDraft}
+                              onChangeText={setMembershipAgeDraft}
+                              placeholder="Ex.: 32"
+                              placeholderTextColor={Colors.textMuted}
+                              keyboardType="number-pad"
+                              style={styles.input}
+                            />
+                          </View>
+                          <View style={[styles.fieldBlock, styles.flex]}>
+                            <Text style={styles.label}>Nota tecnica</Text>
+                            <Text style={styles.fieldHint}>De 0 a 10, com ate 2 casas decimais.</Text>
+                            <TextInput
+                              value={membershipRatingDraft}
+                              onChangeText={setMembershipRatingDraft}
+                              placeholder="Ex.: 7,50"
+                              placeholderTextColor={Colors.textMuted}
+                              keyboardType="decimal-pad"
+                              style={styles.input}
+                            />
+                          </View>
+                        </View>
+
+                        <View style={styles.fieldBlock}>
+                          <Text style={styles.label}>Observacao</Text>
+                          <Text style={styles.fieldHint}>
+                            Use para registrar restricoes, estilo de jogo ou qualquer detalhe util na montagem dos times.
+                          </Text>
+                          <TextInput
+                            value={membershipNotesDraft}
+                            onChangeText={setMembershipNotesDraft}
+                            placeholder="Ex.: volta de lesao, prefere jogar aberto pela direita..."
+                            placeholderTextColor={Colors.textMuted}
+                            style={[styles.input, styles.multiline]}
+                            multiline
+                          />
+                        </View>
+
                         <View style={styles.fieldBlock}>
                           <Text style={styles.label}>Grupo prioritario</Text>
                           <View style={styles.chips}>
@@ -3287,6 +3426,48 @@ export default function HomeScreen() {
                         onClear={handleClearPlayerPhoto}
                         disabled={isSubmittingModal}
                       />
+
+                      <View style={styles.row}>
+                        <View style={[styles.fieldBlock, styles.flex]}>
+                          <Text style={styles.label}>Idade</Text>
+                          <Text style={styles.fieldHint}>Opcional. Informe em anos.</Text>
+                          <TextInput
+                            value={playerAgeDraft}
+                            onChangeText={setPlayerAgeDraft}
+                            placeholder="Ex.: 32"
+                            placeholderTextColor={Colors.textMuted}
+                            keyboardType="number-pad"
+                            style={styles.input}
+                          />
+                        </View>
+                        <View style={[styles.fieldBlock, styles.flex]}>
+                          <Text style={styles.label}>Nota tecnica</Text>
+                          <Text style={styles.fieldHint}>De 0 a 10, com ate 2 casas decimais.</Text>
+                          <TextInput
+                            value={playerRatingDraft}
+                            onChangeText={setPlayerRatingDraft}
+                            placeholder="Ex.: 7,50"
+                            placeholderTextColor={Colors.textMuted}
+                            keyboardType="decimal-pad"
+                            style={styles.input}
+                          />
+                        </View>
+                      </View>
+
+                      <View style={styles.fieldBlock}>
+                        <Text style={styles.label}>Observacao</Text>
+                        <Text style={styles.fieldHint}>
+                          Use para registrar restricoes, estilo de jogo ou qualquer detalhe util na montagem dos times.
+                        </Text>
+                        <TextInput
+                          value={playerNotesDraft}
+                          onChangeText={setPlayerNotesDraft}
+                          placeholder="Ex.: prefere marcar por dentro, evita jogos muito longos..."
+                          placeholderTextColor={Colors.textMuted}
+                          style={[styles.input, styles.multiline]}
+                          multiline
+                        />
+                      </View>
                     </View>
 
                     <View style={styles.formSection}>
@@ -4763,6 +4944,10 @@ export default function HomeScreen() {
                         Prioridade: {item.priorityGroup?.name ?? "Nao definida"}
                       </Text>
                       <Text style={styles.panelText}>
+                        Idade: {item.player.age !== null ? `${item.player.age} anos` : "Nao informada"} | Nota:{" "}
+                        {formatPlayerRating(item.player.rating)}
+                      </Text>
+                      <Text style={styles.panelText}>
                         Posicoes:{" "}
                         {item.preferredPositions.length > 0
                           ? item.preferredPositions.map((position) => position.name).join(", ")
@@ -4771,6 +4956,9 @@ export default function HomeScreen() {
                       <Text style={styles.panelText}>
                         Lista semanal: {item.player.is_default_for_weekly_list ? "Entra por padrao" : "Fora da base"}
                       </Text>
+                      {item.player.notes ? (
+                        <Text style={styles.panelText}>Observacao: {item.player.notes}</Text>
+                      ) : null}
                     </View>
                     <View style={styles.listActions}>
                       <Pressable onPress={() => openEditPlayerModal(item)} style={styles.inlineActionButton}>

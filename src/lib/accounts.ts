@@ -146,6 +146,9 @@ export type CreateAccountPlayerInput = {
   fullName: string;
   email: string | null;
   photoUrl: string | null;
+  age: number | null;
+  rating: number | null;
+  notes: string | null;
   linkedProfileId: string | null;
   priorityGroupId: string | null;
   isDefaultForWeeklyList: boolean;
@@ -158,6 +161,9 @@ export type UpdateAccountPlayerInput = {
   fullName: string;
   email: string | null;
   photoUrl: string | null;
+  age: number | null;
+  rating: number | null;
+  notes: string | null;
   linkedProfileId: string | null;
   priorityGroupId: string | null;
   isDefaultForWeeklyList: boolean;
@@ -169,6 +175,9 @@ export type UpsertAccountPlayerFromAccessInput = {
   fullName: string;
   email: string;
   photoUrl: string | null;
+  age: number | null;
+  rating: number | null;
+  notes: string | null;
   linkedProfileId: string;
   priorityGroupId: string | null;
   isDefaultForWeeklyList: boolean;
@@ -309,6 +318,9 @@ const eventMatchTeamSelectFields =
 
 const eventMatchTeamPlayerSelectFields =
   "id, team_id, account_player_id, sort_order, created_at";
+
+const accountPlayerSelectFields =
+  "id, account_id, linked_profile_id, full_name, email, photo_url, age, rating, notes, priority_group_id, is_default_for_weekly_list, is_active, created_by, created_at, updated_at";
 
 function normalizeClockTime(value: string) {
   return value.length === 5 ? `${value}:00` : value;
@@ -1127,9 +1139,7 @@ export async function listAccountPlayers(
 ): Promise<AccountPlayerAdminItem[]> {
   const { data: playerData, error: playerError } = await supabase
     .from("account_players")
-    .select(
-      "id, account_id, linked_profile_id, full_name, email, photo_url, priority_group_id, is_default_for_weekly_list, is_active, created_by, created_at, updated_at",
-    )
+    .select(accountPlayerSelectFields)
     .eq("account_id", accountId)
     .eq("is_active", true)
     .order("full_name", { ascending: true });
@@ -1425,9 +1435,7 @@ export async function listWeeklyEventParticipants(
 
   const { data: playerData, error: playerError } = await supabase
     .from("account_players")
-    .select(
-      "id, account_id, linked_profile_id, full_name, email, photo_url, priority_group_id, is_default_for_weekly_list, is_active, created_by, created_at, updated_at",
-    )
+    .select(accountPlayerSelectFields)
     .in("id", playerIds);
 
   throwIfError(playerError);
@@ -1627,9 +1635,7 @@ export async function listEventPollResults(eventId: string): Promise<EventPollRe
     if (playerIds.length > 0) {
       const { data: playerData, error: playerError } = await supabase
         .from("account_players")
-        .select(
-          "id, account_id, linked_profile_id, full_name, email, photo_url, priority_group_id, is_default_for_weekly_list, is_active, created_by, created_at, updated_at",
-        )
+        .select(accountPlayerSelectFields)
         .in("id", playerIds);
 
       throwIfError(playerError);
@@ -1995,9 +2001,7 @@ export async function listEventMatches(eventId: string): Promise<EventMatchItem[
     playerIds.length > 0
       ? await supabase
           .from("account_players")
-          .select(
-            "id, account_id, linked_profile_id, full_name, email, photo_url, priority_group_id, is_default_for_weekly_list, is_active, created_by, created_at, updated_at",
-          )
+          .select(accountPlayerSelectFields)
           .in("id", playerIds)
       : {
           data: [] as AccountPlayer[],
@@ -2248,9 +2252,7 @@ export async function createWeeklyEventCall(input: {
   const [defaultPlayers, memberships] = await Promise.all([
     supabase
       .from("account_players")
-      .select(
-        "id, account_id, linked_profile_id, full_name, email, photo_url, priority_group_id, is_default_for_weekly_list, is_active, created_by, created_at, updated_at",
-      )
+      .select(accountPlayerSelectFields)
       .eq("account_id", input.account.id)
       .eq("is_active", true)
       .eq("is_default_for_weekly_list", true)
@@ -2335,9 +2337,7 @@ export async function addPlayerToWeeklyEvent(input: {
   ] = await Promise.all([
     supabase
       .from("account_players")
-      .select(
-        "id, account_id, linked_profile_id, full_name, email, photo_url, priority_group_id, is_default_for_weekly_list, is_active, created_by, created_at, updated_at",
-      )
+      .select(accountPlayerSelectFields)
       .eq("id", input.playerId)
       .single(),
     listActiveMembershipsForAccount(event.account_id),
@@ -2644,14 +2644,15 @@ export async function createAccountPlayer(input: CreateAccountPlayerInput) {
       full_name: input.fullName,
       email: normalizedEmail,
       photo_url: input.photoUrl,
+      age: input.age,
+      rating: input.rating,
+      notes: input.notes,
       priority_group_id: input.priorityGroupId,
       is_default_for_weekly_list: input.isDefaultForWeeklyList,
       is_active: true,
       created_by: input.createdBy,
     })
-    .select(
-      "id, account_id, linked_profile_id, full_name, email, photo_url, priority_group_id, is_default_for_weekly_list, is_active, created_by, created_at, updated_at",
-    )
+    .select(accountPlayerSelectFields)
     .single();
 
   throwIfError(playerError);
@@ -2672,9 +2673,7 @@ export async function createAccountPlayer(input: CreateAccountPlayerInput) {
 export async function updateAccountPlayer(input: UpdateAccountPlayerInput) {
   const { data: existingPlayerData, error: existingPlayerError } = await supabase
     .from("account_players")
-    .select(
-      "id, account_id, linked_profile_id, full_name, email, photo_url, priority_group_id, is_default_for_weekly_list, is_active, created_by, created_at, updated_at",
-    )
+    .select(accountPlayerSelectFields)
     .eq("id", input.playerId)
     .single();
 
@@ -2690,6 +2689,9 @@ export async function updateAccountPlayer(input: UpdateAccountPlayerInput) {
       full_name: input.fullName,
       email: normalizedEmail,
       photo_url: input.photoUrl,
+      age: input.age,
+      rating: input.rating,
+      notes: input.notes,
       priority_group_id: input.priorityGroupId,
       is_default_for_weekly_list: input.isDefaultForWeeklyList,
       is_active: true,
@@ -2715,9 +2717,7 @@ export async function upsertAccountPlayerFromAccess(
 
   const { data: linkedPlayerData, error: linkedPlayerError } = await supabase
     .from("account_players")
-    .select(
-      "id, account_id, linked_profile_id, full_name, email, photo_url, priority_group_id, is_default_for_weekly_list, is_active, created_by, created_at, updated_at",
-    )
+    .select(accountPlayerSelectFields)
     .eq("account_id", input.accountId)
     .eq("linked_profile_id", input.linkedProfileId)
     .maybeSingle();
@@ -2729,9 +2729,7 @@ export async function upsertAccountPlayerFromAccess(
   if (!existingPlayer) {
     const { data: emailPlayerData, error: emailPlayerError } = await supabase
       .from("account_players")
-      .select(
-        "id, account_id, linked_profile_id, full_name, email, photo_url, priority_group_id, is_default_for_weekly_list, is_active, created_by, created_at, updated_at",
-      )
+      .select(accountPlayerSelectFields)
       .eq("account_id", input.accountId)
       .ilike("email", normalizedEmail)
       .maybeSingle();
@@ -2746,6 +2744,9 @@ export async function upsertAccountPlayerFromAccess(
         fullName: input.fullName,
         email: normalizedEmail,
         photoUrl: input.photoUrl,
+        age: input.age,
+        rating: input.rating,
+        notes: input.notes,
         linkedProfileId: input.linkedProfileId,
         priorityGroupId: input.priorityGroupId,
         isDefaultForWeeklyList: input.isDefaultForWeeklyList,
@@ -2754,9 +2755,7 @@ export async function upsertAccountPlayerFromAccess(
 
     const { data: updatedPlayerData, error: updatedPlayerError } = await supabase
       .from("account_players")
-      .select(
-        "id, account_id, linked_profile_id, full_name, email, photo_url, priority_group_id, is_default_for_weekly_list, is_active, created_by, created_at, updated_at",
-      )
+      .select(accountPlayerSelectFields)
       .eq("id", existingPlayer.id)
       .single();
 
@@ -2768,14 +2767,17 @@ export async function upsertAccountPlayerFromAccess(
     accountId: input.accountId,
     fullName: input.fullName,
     email: normalizedEmail,
-      photoUrl: input.photoUrl,
-      linkedProfileId: input.linkedProfileId,
-      priorityGroupId: input.priorityGroupId,
-      isDefaultForWeeklyList: input.isDefaultForWeeklyList,
-      createdBy: input.createdBy,
-      preferredPositionIds: input.preferredPositionIds,
-    });
-  }
+    photoUrl: input.photoUrl,
+    age: input.age,
+    rating: input.rating,
+    notes: input.notes,
+    linkedProfileId: input.linkedProfileId,
+    priorityGroupId: input.priorityGroupId,
+    isDefaultForWeeklyList: input.isDefaultForWeeklyList,
+    createdBy: input.createdBy,
+    preferredPositionIds: input.preferredPositionIds,
+  });
+}
 
 export async function deactivateAccountPlayer(playerId: string) {
   const { error } = await supabase

@@ -101,6 +101,9 @@ export type AccountPlayer = {
   full_name: string;
   email: string | null;
   photo_url: string | null;
+  age: number | null;
+  rating: number | null;
+  notes: string | null;
   priority_group_id: string | null;
   is_default_for_weekly_list: boolean;
   is_active: boolean;
