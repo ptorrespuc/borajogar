@@ -2,6 +2,7 @@ import React from 'react';
 import FontAwesome from '@expo/vector-icons/FontAwesome';
 import { Link, Redirect, Tabs } from 'expo-router';
 import { ActivityIndicator, Pressable, Text, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import Colors from '@/constants/Colors';
 import { useClientOnlyValue } from '@/components/useClientOnlyValue';
@@ -16,6 +17,9 @@ function TabBarIcon(props: {
 
 export default function TabLayout() {
   const { session, isLoading } = useAuth();
+  const insets = useSafeAreaInsets();
+  const tabBarBottomPadding = Math.max(insets.bottom, 12);
+  const tabBarHeight = 56 + tabBarBottomPadding;
 
   if (isLoading) {
     return (
@@ -47,9 +51,9 @@ export default function TabLayout() {
         tabBarStyle: {
           backgroundColor: Colors.surface,
           borderTopColor: Colors.border,
-          height: 70,
+          height: tabBarHeight,
           paddingTop: 8,
-          paddingBottom: 8,
+          paddingBottom: tabBarBottomPadding,
         },
         tabBarLabelStyle: {
           fontSize: 12,

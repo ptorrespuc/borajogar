@@ -1869,7 +1869,7 @@ export async function upsertEventPollVote(input: UpsertEventPollVoteInput) {
     }
 
     optionId = option.id;
-    targetParticipantId = option.target_participant_id ?? null;
+    targetParticipantId = null;
   } else {
     if (!input.targetParticipantId) {
       throw new Error("Escolha um jogador para votar.");
