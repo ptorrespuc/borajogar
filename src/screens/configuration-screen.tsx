@@ -14,6 +14,7 @@ import {
   TextInput,
   View,
 } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import Colors from "@/constants/Colors";
 import { PlayerPhotoField } from "@/src/components/player-photo-field";
@@ -419,6 +420,7 @@ async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, context: s
 }
 
 export default function HomeScreen() {
+  const insets = useSafeAreaInsets();
   const { profile, memberships, error, signOut, refresh } = useAuth();
   const isSuperAdmin = Boolean(profile?.is_super_admin);
   const [superAdminAccounts, setSuperAdminAccounts] = useState<SportsAccount[]>([]);
@@ -2957,10 +2959,18 @@ export default function HomeScreen() {
         visible
         transparent
         onRequestClose={closeAdminModal}>
-        <View style={styles.modalBackdrop}>
+        <View
+          style={[
+            styles.modalBackdrop,
+            {
+              paddingTop: Math.max(insets.top + 12, 24),
+              paddingBottom: Math.max(insets.bottom + 12, 24),
+            },
+          ]}>
           <KeyboardAvoidingView
             behavior={Platform.OS === "ios" ? "padding" : "height"}
-            keyboardVerticalOffset={Platform.OS === "ios" ? 0 : 18}>
+            keyboardVerticalOffset={Platform.OS === "ios" ? 0 : 18}
+            style={styles.modalKeyboard}>
             <View style={styles.modalCard}>
               <View style={styles.inlineHeader}>
                 <Text style={styles.modalTitle}>{title}</Text>
@@ -5523,8 +5533,13 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     padding: 20,
   },
+  modalKeyboard: {
+    width: "100%",
+  },
   modalCard: {
-    maxHeight: "88%",
+    maxHeight: "100%",
+    width: "100%",
+    alignSelf: "center",
     borderRadius: 28,
     backgroundColor: Colors.surface,
     borderWidth: 1,
