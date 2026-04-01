@@ -2609,6 +2609,10 @@ export async function completeWeeklyEvent(eventId: string) {
     return;
   }
 
+  if (event.status !== "published") {
+    throw new Error("Feche a lista antes de encerrar o evento.");
+  }
+
   const { error: eventUpdateError } = await supabase
     .from("events")
     .update({

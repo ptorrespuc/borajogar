@@ -13,6 +13,7 @@ import {
   TextInput,
   View,
 } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import Colors from "@/constants/Colors";
 import {
@@ -303,6 +304,7 @@ function balanceMatchTeams(
 }
 
 export default function EventsScreen() {
+  const insets = useSafeAreaInsets();
   const { profile, memberships } = useAuth();
   const isSuperAdmin = Boolean(profile?.is_super_admin);
   const [superAdminAccounts, setSuperAdminAccounts] = useState<SportsAccount[]>([]);
@@ -872,7 +874,8 @@ export default function EventsScreen() {
     try {
       await completeWeeklyEvent(eventId);
       await reloadScreenData();
-      setMessage({ tone: "success", text: "Evento encerrado." });
+      setExpandedEventId(eventId);
+      setMessage({ tone: "success", text: "Evento encerrado e movido para o historico." });
     } catch (actionError) {
       setMessage({ tone: "error", text: getReadableError(actionError) });
     } finally {
@@ -1980,10 +1983,18 @@ export default function EventsScreen() {
 
     return (
       <Modal animationType="fade" visible={isEventPollModalVisible} transparent onRequestClose={closeEventPollModal}>
-        <View style={styles.modalBackdrop}>
+        <View
+          style={[
+            styles.modalBackdrop,
+            {
+              paddingTop: Math.max(insets.top + 12, 24),
+              paddingBottom: Math.max(insets.bottom + 12, 24),
+            },
+          ]}>
           <KeyboardAvoidingView
             behavior={Platform.OS === "ios" ? "padding" : "height"}
-            keyboardVerticalOffset={Platform.OS === "ios" ? 0 : 18}>
+            keyboardVerticalOffset={Platform.OS === "ios" ? 0 : 18}
+            style={styles.modalKeyboard}>
             <View style={styles.modalCard}>
               <View style={styles.inlineHeader}>
                 <Text style={styles.modalTitle}>Criar enquete do evento</Text>
@@ -1992,7 +2003,10 @@ export default function EventsScreen() {
                 </Pressable>
               </View>
 
-              <ScrollView contentContainerStyle={styles.modalContent} keyboardShouldPersistTaps="handled">
+              <ScrollView
+                contentContainerStyle={styles.modalContent}
+                keyboardShouldPersistTaps="handled"
+                showsVerticalScrollIndicator={false}>
                 <View style={styles.formSection}>
                   <Text style={styles.formSectionTitle}>Escolha a origem da enquete</Text>
                   <View style={styles.chips}>
@@ -2217,8 +2231,18 @@ export default function EventsScreen() {
 
     return (
       <Modal animationType="fade" visible transparent onRequestClose={closeMatchModal}>
-        <View style={styles.modalBackdrop}>
-          <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"}>
+        <View
+          style={[
+            styles.modalBackdrop,
+            {
+              paddingTop: Math.max(insets.top + 12, 24),
+              paddingBottom: Math.max(insets.bottom + 12, 24),
+            },
+          ]}>
+          <KeyboardAvoidingView
+            behavior={Platform.OS === "ios" ? "padding" : "height"}
+            keyboardVerticalOffset={Platform.OS === "ios" ? 0 : 18}
+            style={styles.modalKeyboard}>
             <View style={styles.modalCard}>
               <View style={styles.inlineHeader}>
                 <Text style={styles.modalTitle}>
@@ -2229,7 +2253,10 @@ export default function EventsScreen() {
                 </Pressable>
               </View>
 
-              <ScrollView contentContainerStyle={styles.modalContent} keyboardShouldPersistTaps="handled">
+              <ScrollView
+                contentContainerStyle={styles.modalContent}
+                keyboardShouldPersistTaps="handled"
+                showsVerticalScrollIndicator={false}>
                 <View style={styles.fieldBlock}>
                   <Text style={styles.label}>Titulo da partida</Text>
                   <TextInput value={matchTitleDraft} onChangeText={setMatchTitleDraft} style={styles.input} />
@@ -2578,7 +2605,8 @@ const styles = StyleSheet.create({
   statusBadgeText: { color: Colors.tint, fontSize: 13, fontWeight: "800" },
   expandLabel: { color: Colors.textMuted, fontSize: 13, fontWeight: "700" },
   modalBackdrop: { flex: 1, backgroundColor: "rgba(17, 33, 24, 0.45)", justifyContent: "center", padding: 20 },
-  modalCard: { maxHeight: "90%", backgroundColor: "#ffffff", borderRadius: 28, padding: 18, gap: 12 },
+  modalKeyboard: { width: "100%" },
+  modalCard: { maxHeight: "100%", width: "100%", alignSelf: "center", backgroundColor: "#ffffff", borderRadius: 28, padding: 18, gap: 12 },
   modalTitle: { color: Colors.text, fontSize: 24, fontWeight: "800" },
   modalContent: { gap: 18, paddingBottom: 12 },
   formSection: { gap: 14 },
