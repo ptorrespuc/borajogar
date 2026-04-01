@@ -314,7 +314,7 @@ export default function EventsScreen() {
   const [eventPollBallots, setEventPollBallots] = useState<EventPollBallot[]>([]);
   const [expandedEventId, setExpandedEventId] = useState<string | null>(null);
   const [activeEventSections, setActiveEventSections] = useState<Record<EventSectionKey, boolean>>({
-    roster: true,
+    roster: false,
     polls: true,
     matches: false,
   });
@@ -595,31 +595,32 @@ export default function EventsScreen() {
     selectedEventPollSource?.kind === "template"
       ? accountPollTemplates.find((template) => template.id === selectedEventPollSource.templateId) ?? null
       : null;
+  const activeEventSectionsDefault =
+    activeEventItem?.event.status === "draft"
+      ? {
+          roster: true,
+          polls: true,
+          matches: false,
+        }
+      : {
+          roster: false,
+          polls: true,
+          matches: false,
+        };
+  const activeEventContextKey = activeEventItem
+    ? `${activeEventItem.event.id}:${activeEventItem.event.status}`
+    : "no-active-event";
+  const resolvedActiveEventSections =
+    activeEventSectionsContext === activeEventContextKey ? activeEventSections : activeEventSectionsDefault;
 
   useEffect(() => {
-    const nextContext = activeEventItem
-      ? `${activeEventItem.event.id}:${activeEventItem.event.status}`
-      : "no-active-event";
-
-    if (activeEventSectionsContext === nextContext) {
+    if (activeEventSectionsContext === activeEventContextKey) {
       return;
     }
 
-    setActiveEventSections(
-      activeEventItem?.event.status === "published"
-        ? {
-            roster: false,
-            polls: true,
-            matches: false,
-          }
-        : {
-            roster: true,
-            polls: true,
-            matches: false,
-          },
-    );
-    setActiveEventSectionsContext(nextContext);
-  }, [activeEventItem, activeEventSectionsContext]);
+    setActiveEventSections(activeEventSectionsDefault);
+    setActiveEventSectionsContext(activeEventContextKey);
+  }, [activeEventContextKey, activeEventSectionsContext, activeEventSectionsDefault]);
 
   async function reloadScreenData() {
     await loadSelectedAccountData();
@@ -1632,8 +1633,12 @@ export default function EventsScreen() {
                 <Text style={styles.metricValue}>{activeEventItem.matches.length}</Text>
               </View>
             </View>
-
-            {renderStateRail(activeEventItem.event.status)}
+            <View style={styles.currentStateRow}>
+              <Text style={styles.currentStateLabel}>Estado atual</Text>
+              <View style={styles.statusBadge}>
+                <Text style={styles.statusBadgeText}>{formatEventState(activeEventItem.event.status)}</Text>
+              </View>
+            </View>
           </View>
 
           {activeEventItem.event.status === "draft" ? (
@@ -1642,7 +1647,7 @@ export default function EventsScreen() {
                 title: "Montagem da lista",
                 subtitle:
                   "Inclua ou retire jogadores sem perder a ordem de prioridade definida pela conta.",
-                isExpanded: activeEventSections.roster,
+                isExpanded: resolvedActiveEventSections.roster,
                 onToggle: () => toggleActiveEventSection("roster"),
                 headerAction: canManageWeeklyList ? (
                   <Pressable
@@ -1792,7 +1797,7 @@ export default function EventsScreen() {
                 title: "Quorum final",
                 subtitle:
                   "Lista definitiva do evento, usada como base para enquetes e partidas.",
-                isExpanded: activeEventSections.roster,
+                isExpanded: resolvedActiveEventSections.roster,
                 onToggle: () => toggleActiveEventSection("roster"),
                 children: renderRosterList(
                   activeParticipants,
@@ -1803,7 +1808,7 @@ export default function EventsScreen() {
               {renderAccordionSection({
                 title: "Enquetes do evento",
                 subtitle: "Vote e acompanhe o resultado parcial ou final de cada enquete.",
-                isExpanded: activeEventSections.polls,
+                isExpanded: resolvedActiveEventSections.polls,
                 onToggle: () => toggleActiveEventSection("polls"),
                 headerAction:
                   activeEventItem.event.status === "published" && canManageWeeklyPolls ? (
@@ -1830,7 +1835,7 @@ export default function EventsScreen() {
               {renderAccordionSection({
                 title: "Partidas",
                 subtitle: "Guarde os confrontos do evento, com times e placares.",
-                isExpanded: activeEventSections.matches,
+                isExpanded: resolvedActiveEventSections.matches,
                 onToggle: () => toggleActiveEventSection("matches"),
                 headerAction:
                   activeEventItem.event.status === "published" &&
@@ -2400,7 +2405,9 @@ export default function EventsScreen() {
       <ScrollView style={styles.screen} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
         <View style={styles.hero}>
           <Text style={styles.heroKicker}>Eventos</Text>
-          <Text style={styles.heroTitle}>Acompanhe o evento da semana.</Text>
+          <Text style={styles.heroTitle}>
+            {selectedAccess ? `Eventos - ${selectedAccess.account.name}` : "Eventos"}
+          </Text>
           <Text style={styles.heroSubtitle}>
             Veja a chamada atual, vote nas enquetes e acompanhe o historico do grupo.
           </Text>
@@ -2428,24 +2435,6 @@ export default function EventsScreen() {
 
         {selectedAccess && overview ? (
           <>
-            <View style={styles.summaryPanel}>
-              <Text style={styles.summaryKicker}>Conta ativa</Text>
-              <Text style={styles.summaryTitle}>{selectedAccess.account.name}</Text>
-              <View style={styles.summaryTags}>
-                <View style={styles.summaryTag}>
-                  <Text style={styles.summaryTagText}>{selectedAccess.roleLabel}</Text>
-                </View>
-                <View style={styles.summaryTag}>
-                  <Text style={styles.summaryTagText}>{overview.modality.name}</Text>
-                </View>
-                {selectedAccess.priorityGroupName ? (
-                  <View style={styles.summaryTag}>
-                    <Text style={styles.summaryTagText}>{selectedAccess.priorityGroupName}</Text>
-                  </View>
-                ) : null}
-              </View>
-            </View>
-
             {message ? (
               <View style={[styles.feedbackBanner, message.tone === "error" ? styles.feedbackError : styles.feedbackSuccess]}>
                 <Text style={[styles.feedbackText, message.tone === "error" ? styles.feedbackErrorText : styles.feedbackSuccessText]}>{message.text}</Text>
@@ -2538,6 +2527,8 @@ const styles = StyleSheet.create({
   metricPill: { minWidth: 96, flexGrow: 1, borderRadius: 16, backgroundColor: "#ffffff", paddingHorizontal: 14, paddingVertical: 12, borderWidth: 1, borderColor: "#dfe7d8", gap: 4 },
   metricLabel: { color: Colors.textMuted, fontSize: 12, fontWeight: "700", textTransform: "uppercase" },
   metricValue: { color: Colors.text, fontSize: 18, fontWeight: "900" },
+  currentStateRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12 },
+  currentStateLabel: { color: Colors.textMuted, fontSize: 12, fontWeight: "700", textTransform: "uppercase" },
   stateRailCompact: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   statePill: { borderRadius: 999, backgroundColor: "#edf3e7", paddingHorizontal: 12, paddingVertical: 10 },
   stateStepCompleted: { backgroundColor: "#d9ebdd" },
