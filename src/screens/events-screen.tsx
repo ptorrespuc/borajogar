@@ -318,6 +318,7 @@ export default function EventsScreen() {
     polls: true,
     matches: false,
   });
+  const [activeEventSectionsContext, setActiveEventSectionsContext] = useState<string | null>(null);
   const [historySectionsByEvent, setHistorySectionsByEvent] = useState<
     Record<string, Record<EventSectionKey, boolean>>
   >({});
@@ -594,6 +595,31 @@ export default function EventsScreen() {
     selectedEventPollSource?.kind === "template"
       ? accountPollTemplates.find((template) => template.id === selectedEventPollSource.templateId) ?? null
       : null;
+
+  useEffect(() => {
+    const nextContext = activeEventItem
+      ? `${activeEventItem.event.id}:${activeEventItem.event.status}`
+      : "no-active-event";
+
+    if (activeEventSectionsContext === nextContext) {
+      return;
+    }
+
+    setActiveEventSections(
+      activeEventItem?.event.status === "published"
+        ? {
+            roster: false,
+            polls: true,
+            matches: false,
+          }
+        : {
+            roster: true,
+            polls: true,
+            matches: false,
+          },
+    );
+    setActiveEventSectionsContext(nextContext);
+  }, [activeEventItem, activeEventSectionsContext]);
 
   async function reloadScreenData() {
     await loadSelectedAccountData();
