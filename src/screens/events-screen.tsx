@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -13,7 +13,6 @@ import {
   TextInput,
   View,
 } from "react-native";
-import { useRouter } from "expo-router";
 
 import Colors from "@/constants/Colors";
 import {
@@ -48,6 +47,7 @@ import type {
   PollSelectionMode,
   PollTemplate,
   SportsAccount,
+  EventPollVote,
 } from "@/src/types/domain";
 
 const roleLabels: Record<AccountRole, string> = {
@@ -85,6 +85,8 @@ type MatchModalState =
       mode: "create" | "edit";
       targetId?: string;
     };
+
+type EventSectionKey = "roster" | "polls" | "matches";
 
 let eventPollOptionDraftCounter = 0;
 
@@ -301,7 +303,6 @@ function balanceMatchTeams(
 }
 
 export default function EventsScreen() {
-  const router = useRouter();
   const { profile, memberships } = useAuth();
   const isSuperAdmin = Boolean(profile?.is_super_admin);
   const [superAdminAccounts, setSuperAdminAccounts] = useState<SportsAccount[]>([]);
@@ -312,6 +313,14 @@ export default function EventsScreen() {
   const [accountPollTemplates, setAccountPollTemplates] = useState<PollTemplate[]>([]);
   const [eventPollBallots, setEventPollBallots] = useState<EventPollBallot[]>([]);
   const [expandedEventId, setExpandedEventId] = useState<string | null>(null);
+  const [activeEventSections, setActiveEventSections] = useState<Record<EventSectionKey, boolean>>({
+    roster: true,
+    polls: true,
+    matches: false,
+  });
+  const [historySectionsByEvent, setHistorySectionsByEvent] = useState<
+    Record<string, Record<EventSectionKey, boolean>>
+  >({});
   const [weeklyPriorityFilter, setWeeklyPriorityFilter] = useState<string>("all");
   const [isLoading, setIsLoading] = useState(false);
   const [isCreatingEvent, setIsCreatingEvent] = useState(false);
@@ -588,6 +597,125 @@ export default function EventsScreen() {
 
   async function reloadScreenData() {
     await loadSelectedAccountData();
+  }
+
+  function toggleActiveEventSection(section: EventSectionKey) {
+    setActiveEventSections((current) => ({
+      ...current,
+      [section]: !current[section],
+    }));
+  }
+
+  function isHistorySectionExpanded(eventId: string, section: EventSectionKey) {
+    return historySectionsByEvent[eventId]?.[section] ?? section === "roster";
+  }
+
+  function toggleHistorySection(eventId: string, section: EventSectionKey) {
+    setHistorySectionsByEvent((current) => {
+      const nextEventSections = current[eventId] ?? {
+        roster: true,
+        polls: false,
+        matches: false,
+      };
+
+      return {
+        ...current,
+        [eventId]: {
+          ...nextEventSections,
+          [section]: !nextEventSections[section],
+        },
+      };
+    });
+  }
+
+  function applyVoteToActiveEvent(
+    ballot: EventPollBallot,
+    optionId: string | null,
+    targetParticipantId: string | null,
+  ) {
+    if (!currentViewerParticipantId || !activeEventItem) {
+      return;
+    }
+
+    const previousSelectionId =
+      ballot.poll.selection_mode === "predefined_options"
+        ? ballot.currentVote?.option_id ?? null
+        : ballot.currentVote?.target_participant_id ?? null;
+    const nextSelectionId =
+      ballot.poll.selection_mode === "predefined_options" ? optionId : targetParticipantId;
+
+    const nextVote: EventPollVote = {
+      id: ballot.currentVote?.id ?? `local-vote-${ballot.poll.id}-${currentViewerParticipantId}`,
+      poll_id: ballot.poll.id,
+      voter_participant_id: currentViewerParticipantId,
+      option_id: ballot.poll.selection_mode === "predefined_options" ? optionId : null,
+      target_participant_id:
+        ballot.poll.selection_mode === "event_participant" ? targetParticipantId : null,
+      created_at: ballot.currentVote?.created_at ?? new Date().toISOString(),
+    };
+
+    setEventPollBallots((current) =>
+      current.map((item) =>
+        item.poll.id === ballot.poll.id
+          ? {
+              ...item,
+              currentVote: nextVote,
+            }
+          : item,
+      ),
+    );
+
+    setTimeline((current) =>
+      current.map((item) => {
+        if (item.event.id !== activeEventItem.event.id) {
+          return item;
+        }
+
+        return {
+          ...item,
+          pollResults: item.pollResults.map((summary) => {
+            if (summary.poll.id !== ballot.poll.id) {
+              return summary;
+            }
+
+            const entries = summary.entries
+              .map((entry) => {
+                let votes = entry.votes;
+
+                if (
+                  previousSelectionId &&
+                  previousSelectionId !== nextSelectionId &&
+                  entry.id === previousSelectionId
+                ) {
+                  votes -= 1;
+                }
+
+                if (nextSelectionId && entry.id === nextSelectionId) {
+                  votes += previousSelectionId === nextSelectionId ? 0 : 1;
+                }
+
+                return {
+                  ...entry,
+                  votes: Math.max(votes, 0),
+                };
+              })
+              .sort((first, second) => {
+                if (second.votes !== first.votes) {
+                  return second.votes - first.votes;
+                }
+
+                return first.label.localeCompare(second.label);
+              });
+
+            return {
+              ...summary,
+              totalVotes: previousSelectionId ? summary.totalVotes : summary.totalVotes + 1,
+              entries,
+            };
+          }),
+        };
+      }),
+    );
   }
 
   async function handleCreateWeeklyEvent() {
@@ -1117,7 +1245,7 @@ export default function EventsScreen() {
         optionId,
         targetParticipantId,
       });
-      await reloadScreenData();
+      applyVoteToActiveEvent(ballot, optionId, targetParticipantId);
       setMessage({ tone: "success", text: "Voto registrado no evento." });
     } catch (voteError) {
       setMessage({ tone: "error", text: getReadableError(voteError) });
@@ -1136,7 +1264,7 @@ export default function EventsScreen() {
     const activeStateIndex = getEventStateIndex(status);
 
     return (
-      <View style={styles.stateRail}>
+      <View style={styles.stateRailCompact}>
         {stateLabels.map((stateLabel, index) => {
           const isCompleted = index < activeStateIndex;
           const isActive = index === activeStateIndex;
@@ -1145,7 +1273,7 @@ export default function EventsScreen() {
             <View
               key={stateLabel}
               style={[
-                styles.stateStep,
+                styles.statePill,
                 isCompleted && styles.stateStepCompleted,
                 isActive && styles.stateStepActive,
               ]}>
@@ -1159,6 +1287,40 @@ export default function EventsScreen() {
             </View>
           );
         })}
+      </View>
+    );
+  }
+
+  function renderAccordionSection({
+    title,
+    subtitle,
+    isExpanded,
+    onToggle,
+    headerAction,
+    children,
+  }: {
+    title: string;
+    subtitle: string;
+    isExpanded: boolean;
+    onToggle: () => void;
+    headerAction?: ReactNode;
+    children: ReactNode;
+  }) {
+    return (
+      <View style={styles.sectionCard}>
+        <View style={styles.inlineHeader}>
+          <View style={styles.inlineHeaderContent}>
+            <Text style={styles.workspaceTitle}>{title}</Text>
+            <Text style={styles.panelText}>{subtitle}</Text>
+          </View>
+          <View style={styles.listActions}>
+            {headerAction}
+            <Pressable onPress={onToggle} style={styles.inlineActionButton}>
+              <Text style={styles.inlineActionText}>{isExpanded ? "Recolher" : "Abrir"}</Text>
+            </Pressable>
+          </View>
+        </View>
+        {isExpanded ? <View style={styles.accordionContent}>{children}</View> : null}
       </View>
     );
   }
@@ -1287,21 +1449,7 @@ export default function EventsScreen() {
     allowManage: boolean,
   ) {
     return (
-      <View style={styles.sectionCard}>
-        <View style={styles.inlineHeader}>
-          <View style={styles.inlineHeaderContent}>
-            <Text style={styles.workspaceTitle}>Partidas</Text>
-            <Text style={styles.panelText}>
-              Guarde as partidas do evento, os times montados e o placar final de cada confronto.
-            </Text>
-          </View>
-          {allowManage ? (
-            <Pressable onPress={openCreateMatchModal} style={styles.secondaryButton}>
-              <Text style={styles.secondaryButtonText}>Nova partida</Text>
-            </Pressable>
-          ) : null}
-        </View>
-
+      <View style={styles.sectionStack}>
         {matches.length > 0 ? (
           matches.map((matchItem) => (
             <View key={matchItem.match.id} style={styles.innerCard}>
@@ -1415,45 +1563,62 @@ export default function EventsScreen() {
       );
     }
 
+    const activeEventSubtitle =
+      activeEventItem.event.status === "draft"
+        ? "Lista em montagem. Ajuste quem entra no jogo antes de fechar."
+        : activeEventItem.event.status === "published"
+          ? "Lista fechada. Agora o foco fica em enquetes e partidas."
+          : "Evento encerrado com quorum, enquetes e partidas registradas.";
+
     return (
       <View style={styles.section}>
         <View style={styles.sectionCard}>
-          <View style={styles.inlineHeader}>
-            <View style={styles.inlineHeaderContent}>
-              <Text style={styles.workspaceTitle}>Evento atual</Text>
-              <Text style={styles.panelText}>
-                O foco principal da conta fica aqui: lista, enquetes e partidas do evento em andamento.
-              </Text>
+          <Text style={styles.workspaceTitle}>Evento atual</Text>
+          <Text style={styles.panelText}>{activeEventSubtitle}</Text>
+
+          <View style={styles.eventOverviewCard}>
+            <View style={styles.rowBetween}>
+              <View style={styles.flex}>
+                <Text style={styles.eventCurrentTitle}>{activeEventItem.event.title}</Text>
+                <Text style={styles.eventMeta}>
+                  {selectedAccess.account.name} | {overview.modality.name} |{" "}
+                  {formatEventDate(activeEventItem.event.starts_at)}
+                </Text>
+              </View>
+              <View style={styles.statusBadge}>
+                <Text style={styles.statusBadgeText}>{formatEventState(activeEventItem.event.status)}</Text>
+              </View>
             </View>
-            <Pressable onPress={() => router.push("/agenda")} style={styles.secondaryButton}>
-              <Text style={styles.secondaryButtonText}>Configuracao</Text>
-            </Pressable>
-          </View>
 
-          {renderStateRail(activeEventItem.event.status)}
+            <View style={styles.metricRow}>
+              <View style={styles.metricPill}>
+                <Text style={styles.metricLabel}>Quorum</Text>
+                <Text style={styles.metricValue}>
+                  {activeParticipants.length}/{activeEventItem.event.max_players}
+                </Text>
+              </View>
+              <View style={styles.metricPill}>
+                <Text style={styles.metricLabel}>Enquetes</Text>
+                <Text style={styles.metricValue}>{activeEventItem.pollResults.length}</Text>
+              </View>
+              <View style={styles.metricPill}>
+                <Text style={styles.metricLabel}>Partidas</Text>
+                <Text style={styles.metricValue}>{activeEventItem.matches.length}</Text>
+              </View>
+            </View>
 
-          <View style={styles.listCard}>
-            <Text style={styles.panelTitle}>{activeEventItem.event.title}</Text>
-            <Text style={styles.panelText}>Grupo: {selectedAccess.account.name}</Text>
-            <Text style={styles.panelText}>
-              Modalidade: {overview.modality.name} | {formatEventDate(activeEventItem.event.starts_at)}
-            </Text>
-            <Text style={styles.panelText}>
-              Na lista: {activeParticipants.length} / {activeEventItem.event.max_players}
-            </Text>
-            <Text style={styles.panelText}>Estado atual: {formatEventState(activeEventItem.event.status)}</Text>
+            {renderStateRail(activeEventItem.event.status)}
           </View>
 
           {activeEventItem.event.status === "draft" ? (
             <>
-              <View style={styles.inlineHeader}>
-                <View style={styles.inlineHeaderContent}>
-                  <Text style={styles.workspaceTitle}>Quorum com lista aberta</Text>
-                  <Text style={styles.panelText}>
-                    Monte a chamada desta semana incluindo ou retirando jogadores sem perder a ordem de prioridade.
-                  </Text>
-                </View>
-                {canManageWeeklyList ? (
+              {renderAccordionSection({
+                title: "Montagem da lista",
+                subtitle:
+                  "Inclua ou retire jogadores sem perder a ordem de prioridade definida pela conta.",
+                isExpanded: activeEventSections.roster,
+                onToggle: () => toggleActiveEventSection("roster"),
+                headerAction: canManageWeeklyList ? (
                   <Pressable
                     onPress={() => confirmCloseList(activeEventItem.event.id)}
                     disabled={eventActionId === `close-${activeEventItem.event.id}`}
@@ -1465,200 +1630,214 @@ export default function EventsScreen() {
                       {eventActionId === `close-${activeEventItem.event.id}` ? "Fechando..." : "Fechar lista"}
                     </Text>
                   </Pressable>
-                ) : null}
-              </View>
-
-              <View style={styles.weeklyBoard}>
-                <View style={styles.weeklyColumn}>
-                  <Text style={styles.workspaceTitle}>Na lista</Text>
-                  <Text style={styles.panelText}>
-                    Jogadores ja inseridos na chamada atual, ordenados pela prioridade da conta.
-                  </Text>
-
-                  {activeParticipants.length > 0 ? (
-                    activeParticipants.map((item) => (
-                      <View key={item.participant.id} style={styles.listCard}>
-                        <View style={styles.listCardHeader}>
-                          <PlayerAvatar name={item.player.full_name} photoUrl={item.player.photo_url} />
-                          <View style={styles.flex}>
-                            <Text style={styles.panelTitle}>{item.player.full_name}</Text>
-                            <Text style={styles.panelText}>
-                              {item.priorityGroup
-                                ? `${item.priorityGroup.priority_rank}. ${item.priorityGroup.name}`
-                                : "Sem prioridade definida"}
-                            </Text>
-                            <Text style={styles.panelText}>
-                              Posicoes:{" "}
-                              {item.preferredPositions.length > 0
-                                ? item.preferredPositions.map((position) => position.name).join(", ")
-                                : "Nao informadas"}
-                            </Text>
-                          </View>
-                          {canManageWeeklyList ? (
-                            <Pressable
-                              onPress={() => void handleRemovePlayerFromWeeklyList(item)}
-                              disabled={eventActionId === item.participant.id}
-                              style={[
-                                styles.inlineDangerButton,
-                                eventActionId === item.participant.id && styles.buttonDisabled,
-                              ]}>
-                              <Text style={styles.inlineDangerText}>
-                                {eventActionId === item.participant.id ? "Retirando..." : "Retirar"}
-                              </Text>
-                            </Pressable>
-                          ) : null}
-                        </View>
-                      </View>
-                    ))
-                  ) : (
-                    <Text style={styles.panelText}>Nenhum jogador entrou na lista ainda.</Text>
-                  )}
-                </View>
-
-                <View style={styles.weeklyColumn}>
-                  <Text style={styles.workspaceTitle}>Fora da lista</Text>
-                  <Text style={styles.panelText}>
-                    Jogadores elegiveis que ainda nao entraram nesta chamada.
-                  </Text>
-
-                  <View style={styles.chips}>
-                    <Pressable
-                      onPress={() => setWeeklyPriorityFilter("all")}
-                      style={[styles.chip, weeklyPriorityFilter === "all" && styles.chipSelected]}>
-                      <Text style={[styles.chipText, weeklyPriorityFilter === "all" && styles.chipTextSelected]}>
-                        Todos
+                ) : undefined,
+                children: (
+                  <View style={styles.weeklyBoard}>
+                    <View style={styles.weeklyColumn}>
+                      <Text style={styles.workspaceTitle}>Na lista</Text>
+                      <Text style={styles.panelText}>
+                        Jogadores ja inseridos na chamada atual, ordenados pela prioridade da conta.
                       </Text>
-                    </Pressable>
-                    {overview.priorityGroups.map((group) => (
-                      <Pressable
-                        key={group.id}
-                        onPress={() => setWeeklyPriorityFilter(group.id)}
-                        style={[styles.chip, weeklyPriorityFilter === group.id && styles.chipSelected]}>
-                        <Text
-                          style={[
-                            styles.chipText,
-                            weeklyPriorityFilter === group.id && styles.chipTextSelected,
-                          ]}>
-                          {group.priority_rank}. {group.name}
-                        </Text>
-                      </Pressable>
-                    ))}
-                  </View>
 
-                  {availableWeeklyPlayers.length > 0 ? (
-                    availableWeeklyPlayers.map((item) => (
-                      <View key={item.player.id} style={styles.listCard}>
-                        <View style={styles.listCardHeader}>
-                          <PlayerAvatar name={item.player.full_name} photoUrl={item.player.photo_url} />
-                          <View style={styles.flex}>
-                            <Text style={styles.panelTitle}>{item.player.full_name}</Text>
-                            <Text style={styles.panelText}>
-                              {item.priorityGroup
-                                ? `${item.priorityGroup.priority_rank}. ${item.priorityGroup.name}`
-                                : "Sem prioridade definida"}
-                            </Text>
-                            <Text style={styles.panelText}>
-                              Posicoes:{" "}
-                              {item.preferredPositions.length > 0
-                                ? item.preferredPositions.map((position) => position.name).join(", ")
-                                : "Nao informadas"}
-                            </Text>
+                      {activeParticipants.length > 0 ? (
+                        activeParticipants.map((item) => (
+                          <View key={item.participant.id} style={styles.listCard}>
+                            <View style={styles.listCardHeader}>
+                              <PlayerAvatar name={item.player.full_name} photoUrl={item.player.photo_url} />
+                              <View style={styles.flex}>
+                                <Text style={styles.panelTitle}>{item.player.full_name}</Text>
+                                <Text style={styles.panelText}>
+                                  {item.priorityGroup
+                                    ? `${item.priorityGroup.priority_rank}. ${item.priorityGroup.name}`
+                                    : "Sem prioridade definida"}
+                                </Text>
+                                <Text style={styles.panelText}>
+                                  Posicoes:{" "}
+                                  {item.preferredPositions.length > 0
+                                    ? item.preferredPositions.map((position) => position.name).join(", ")
+                                    : "Nao informadas"}
+                                </Text>
+                              </View>
+                              {canManageWeeklyList ? (
+                                <Pressable
+                                  onPress={() => void handleRemovePlayerFromWeeklyList(item)}
+                                  disabled={eventActionId === item.participant.id}
+                                  style={[
+                                    styles.inlineDangerButton,
+                                    eventActionId === item.participant.id && styles.buttonDisabled,
+                                  ]}>
+                                  <Text style={styles.inlineDangerText}>
+                                    {eventActionId === item.participant.id ? "Retirando..." : "Retirar"}
+                                  </Text>
+                                </Pressable>
+                              ) : null}
+                            </View>
                           </View>
-                          {canManageWeeklyList ? (
-                            <Pressable
-                              onPress={() => void handleAddPlayerToWeeklyList(item)}
-                              disabled={eventActionId === item.player.id}
+                        ))
+                      ) : (
+                        <Text style={styles.panelText}>Nenhum jogador entrou na lista ainda.</Text>
+                      )}
+                    </View>
+
+                    <View style={styles.weeklyColumn}>
+                      <Text style={styles.workspaceTitle}>Fora da lista</Text>
+                      <Text style={styles.panelText}>
+                        Jogadores elegiveis que ainda nao entraram nesta chamada.
+                      </Text>
+
+                      <View style={styles.chips}>
+                        <Pressable
+                          onPress={() => setWeeklyPriorityFilter("all")}
+                          style={[styles.chip, weeklyPriorityFilter === "all" && styles.chipSelected]}>
+                          <Text
+                            style={[
+                              styles.chipText,
+                              weeklyPriorityFilter === "all" && styles.chipTextSelected,
+                            ]}>
+                            Todos
+                          </Text>
+                        </Pressable>
+                        {overview.priorityGroups.map((group) => (
+                          <Pressable
+                            key={group.id}
+                            onPress={() => setWeeklyPriorityFilter(group.id)}
+                            style={[styles.chip, weeklyPriorityFilter === group.id && styles.chipSelected]}>
+                            <Text
                               style={[
-                                styles.inlineActionButton,
-                                eventActionId === item.player.id && styles.buttonDisabled,
+                                styles.chipText,
+                                weeklyPriorityFilter === group.id && styles.chipTextSelected,
                               ]}>
-                              <Text style={styles.inlineActionText}>
-                                {eventActionId === item.player.id ? "Incluindo..." : "Incluir"}
-                              </Text>
-                            </Pressable>
-                          ) : null}
-                        </View>
+                              {group.priority_rank}. {group.name}
+                            </Text>
+                          </Pressable>
+                        ))}
                       </View>
-                    ))
-                  ) : (
-                    <Text style={styles.panelText}>
-                      {accountPlayers.length === 0
-                        ? "Primeiro cadastre os jogadores na aba Elenco."
-                        : "Nenhum jogador fora da lista para esse filtro."}
-                    </Text>
-                  )}
-                </View>
-              </View>
+
+                      {availableWeeklyPlayers.length > 0 ? (
+                        availableWeeklyPlayers.map((item) => (
+                          <View key={item.player.id} style={styles.listCard}>
+                            <View style={styles.listCardHeader}>
+                              <PlayerAvatar name={item.player.full_name} photoUrl={item.player.photo_url} />
+                              <View style={styles.flex}>
+                                <Text style={styles.panelTitle}>{item.player.full_name}</Text>
+                                <Text style={styles.panelText}>
+                                  {item.priorityGroup
+                                    ? `${item.priorityGroup.priority_rank}. ${item.priorityGroup.name}`
+                                    : "Sem prioridade definida"}
+                                </Text>
+                                <Text style={styles.panelText}>
+                                  Posicoes:{" "}
+                                  {item.preferredPositions.length > 0
+                                    ? item.preferredPositions.map((position) => position.name).join(", ")
+                                    : "Nao informadas"}
+                                </Text>
+                              </View>
+                              {canManageWeeklyList ? (
+                                <Pressable
+                                  onPress={() => void handleAddPlayerToWeeklyList(item)}
+                                  disabled={eventActionId === item.player.id}
+                                  style={[
+                                    styles.inlineActionButton,
+                                    eventActionId === item.player.id && styles.buttonDisabled,
+                                  ]}>
+                                  <Text style={styles.inlineActionText}>
+                                    {eventActionId === item.player.id ? "Incluindo..." : "Incluir"}
+                                  </Text>
+                                </Pressable>
+                              ) : null}
+                            </View>
+                          </View>
+                        ))
+                      ) : (
+                        <Text style={styles.panelText}>
+                          {accountPlayers.length === 0
+                            ? "Primeiro cadastre os jogadores na aba Elenco."
+                            : "Nenhum jogador fora da lista para esse filtro."}
+                        </Text>
+                      )}
+                    </View>
+                  </View>
+                ),
+              })}
             </>
           ) : (
             <>
-              <View style={styles.inlineHeader}>
-                <View style={styles.inlineHeaderContent}>
-                  <Text style={styles.workspaceTitle}>
-                    {activeEventItem.event.status === "published" ? "Lista fechada" : "Evento encerrado"}
-                  </Text>
-                  <Text style={styles.panelText}>
-                    {activeEventItem.event.status === "published"
-                      ? "A lista foi congelada. Agora voce pode conduzir enquetes, partidas e depois encerrar o evento."
-                      : "O evento foi encerrado. Aqui ficam o quorum final, os resultados das enquetes e as partidas registradas."}
-                  </Text>
-                </View>
-                {activeEventItem.event.status === "published" && canManageWeeklyList ? (
-                  <Pressable
-                    onPress={() => confirmCompleteEvent(activeEventItem.event.id)}
-                    disabled={eventActionId === `complete-${activeEventItem.event.id}`}
-                    style={[
-                      styles.inlineDangerButton,
-                      eventActionId === `complete-${activeEventItem.event.id}` && styles.buttonDisabled,
-                    ]}>
-                    <Text style={styles.inlineDangerText}>
-                      {eventActionId === `complete-${activeEventItem.event.id}` ? "Encerrando..." : "Encerrar evento"}
-                    </Text>
-                  </Pressable>
-                ) : null}
-              </View>
+              {renderAccordionSection({
+                title: "Quorum final",
+                subtitle:
+                  "Lista definitiva do evento, usada como base para enquetes e partidas.",
+                isExpanded: activeEventSections.roster,
+                onToggle: () => toggleActiveEventSection("roster"),
+                children: renderRosterList(
+                  activeParticipants,
+                  "Nenhum jogador foi mantido na lista final.",
+                ),
+              })}
 
-              <View style={styles.sectionCard}>
-                <Text style={styles.workspaceTitle}>Quorum final</Text>
-                <Text style={styles.panelText}>
-                  Essa e a lista definitiva do evento, usada como base para enquetes e partidas.
-                </Text>
-                {renderRosterList(activeParticipants, "Nenhum jogador foi mantido na lista final.")}
-              </View>
-
-              <View style={styles.sectionCard}>
-                <View style={styles.inlineHeader}>
-                  <View style={styles.inlineHeaderContent}>
-                    <Text style={styles.workspaceTitle}>Enquetes do evento</Text>
-                    <Text style={styles.panelText}>
-                      Vote direto nesta tela e acompanhe o resultado parcial ou final de cada enquete.
-                    </Text>
-                  </View>
-                  {activeEventItem.event.status === "published" && canManageWeeklyPolls ? (
+              {renderAccordionSection({
+                title: "Enquetes do evento",
+                subtitle: "Vote e acompanhe o resultado parcial ou final de cada enquete.",
+                isExpanded: activeEventSections.polls,
+                onToggle: () => toggleActiveEventSection("polls"),
+                headerAction:
+                  activeEventItem.event.status === "published" && canManageWeeklyPolls ? (
                     <Pressable onPress={openCreateEventPollModal} style={styles.secondaryButton}>
                       <Text style={styles.secondaryButtonText}>
                         {eventPollBallots.length > 0 ? "Nova enquete" : "Criar enquete"}
                       </Text>
                     </Pressable>
-                  ) : null}
-                </View>
+                  ) : undefined,
+                children:
+                  eventPollBallots.length > 0 ? (
+                    <View style={styles.sectionStack}>
+                      {eventPollBallots.map((ballot) => renderPollCard(ballot))}
+                    </View>
+                  ) : (
+                    <Text style={styles.panelText}>
+                      {activeEventItem.event.status === "published"
+                        ? "Nenhuma enquete criada ainda para esse evento."
+                        : "Nenhuma enquete ficou registrada nesse evento."}
+                    </Text>
+                  ),
+              })}
 
-                {eventPollBallots.length > 0 ? (
-                  eventPollBallots.map((ballot) => renderPollCard(ballot))
-                ) : (
-                  <Text style={styles.panelText}>
-                    {activeEventItem.event.status === "published"
-                      ? "Nenhuma enquete criada ainda para esse evento."
-                      : "Nenhuma enquete ficou registrada nesse evento."}
-                  </Text>
-                )}
-              </View>
-
-              {renderMatchesSection(
-                activeEventItem.matches,
-                activeEventItem.participants,
-                activeEventItem.event.status === "published" && canManageWeeklyPolls,
-              )}
+              {renderAccordionSection({
+                title: "Partidas",
+                subtitle: "Guarde os confrontos do evento, com times e placares.",
+                isExpanded: activeEventSections.matches,
+                onToggle: () => toggleActiveEventSection("matches"),
+                headerAction:
+                  activeEventItem.event.status === "published" &&
+                  (canManageWeeklyPolls || canManageWeeklyList) ? (
+                    <View style={styles.listActions}>
+                      {canManageWeeklyPolls ? (
+                        <Pressable onPress={openCreateMatchModal} style={styles.secondaryButton}>
+                          <Text style={styles.secondaryButtonText}>Nova partida</Text>
+                        </Pressable>
+                      ) : null}
+                      {canManageWeeklyList ? (
+                        <Pressable
+                          onPress={() => confirmCompleteEvent(activeEventItem.event.id)}
+                          disabled={eventActionId === `complete-${activeEventItem.event.id}`}
+                          style={[
+                            styles.inlineDangerButton,
+                            eventActionId === `complete-${activeEventItem.event.id}` && styles.buttonDisabled,
+                          ]}>
+                          <Text style={styles.inlineDangerText}>
+                            {eventActionId === `complete-${activeEventItem.event.id}`
+                              ? "Encerrando..."
+                              : "Encerrar evento"}
+                          </Text>
+                        </Pressable>
+                      ) : null}
+                    </View>
+                  ) : undefined,
+                children: renderMatchesSection(
+                  activeEventItem.matches,
+                  activeEventItem.participants,
+                  activeEventItem.event.status === "published" && canManageWeeklyPolls,
+                ),
+              })}
             </>
           )}
         </View>
@@ -1695,46 +1874,68 @@ export default function EventsScreen() {
 
         {isExpanded ? (
           <View style={styles.eventContent}>
-            <View style={styles.sectionCard}>
-              <Text style={styles.workspaceTitle}>Quorum</Text>
-              <Text style={styles.panelText}>Lista consolidada de quem entrou nesse evento.</Text>
-              {renderRosterList(activeRoster, "Nenhum jogador foi registrado no quorum desse evento.")}
-            </View>
+            {renderAccordionSection({
+              title: "Quorum",
+              subtitle: "Lista consolidada de quem entrou nesse evento.",
+              isExpanded: isHistorySectionExpanded(item.event.id, "roster"),
+              onToggle: () => toggleHistorySection(item.event.id, "roster"),
+              children: renderRosterList(
+                activeRoster,
+                "Nenhum jogador foi registrado no quorum desse evento.",
+              ),
+            })}
 
-            <View style={styles.sectionCard}>
-              <Text style={styles.workspaceTitle}>Resultados das enquetes</Text>
-              {item.pollResults.length > 0 ? (
-                item.pollResults.map((summary) => (
-                  <View key={summary.poll.id} style={styles.innerCard}>
-                    <Text style={styles.innerCardTitle}>{summary.poll.title}</Text>
-                    <Text style={styles.innerCardMeta}>
-                      {summary.poll.template_id ? "Modelo recorrente" : "Enquete avulsa"} | {summary.totalVotes} voto(s)
-                    </Text>
-                    {summary.poll.description ? <Text style={styles.innerCardText}>{summary.poll.description}</Text> : null}
-                    {summary.entries.length > 0 ? (
-                      summary.entries.map((entry) => (
-                        <View key={entry.id} style={styles.rowBetween}>
-                          <View style={styles.rowWithAvatar}>
-                            <PlayerAvatar name={entry.label} photoUrl={entry.photoUrl} size={32} />
-                            <View style={styles.flex}>
-                              <Text style={styles.eventPersonName}>{entry.label}</Text>
-                              {entry.description ? <Text style={styles.eventPersonMeta}>{entry.description}</Text> : null}
+            {renderAccordionSection({
+              title: "Resultados das enquetes",
+              subtitle: "Veja os resultados consolidados das votacoes registradas nesse evento.",
+              isExpanded: isHistorySectionExpanded(item.event.id, "polls"),
+              onToggle: () => toggleHistorySection(item.event.id, "polls"),
+              children:
+                item.pollResults.length > 0 ? (
+                  <View style={styles.sectionStack}>
+                    {item.pollResults.map((summary) => (
+                      <View key={summary.poll.id} style={styles.innerCard}>
+                        <Text style={styles.innerCardTitle}>{summary.poll.title}</Text>
+                        <Text style={styles.innerCardMeta}>
+                          {summary.poll.template_id ? "Modelo recorrente" : "Enquete avulsa"} |{" "}
+                          {summary.totalVotes} voto(s)
+                        </Text>
+                        {summary.poll.description ? (
+                          <Text style={styles.innerCardText}>{summary.poll.description}</Text>
+                        ) : null}
+                        {summary.entries.length > 0 ? (
+                          summary.entries.map((entry) => (
+                            <View key={entry.id} style={styles.rowBetween}>
+                              <View style={styles.rowWithAvatar}>
+                                <PlayerAvatar name={entry.label} photoUrl={entry.photoUrl} size={32} />
+                                <View style={styles.flex}>
+                                  <Text style={styles.eventPersonName}>{entry.label}</Text>
+                                  {entry.description ? (
+                                    <Text style={styles.eventPersonMeta}>{entry.description}</Text>
+                                  ) : null}
+                                </View>
+                              </View>
+                              <Text style={styles.voteCount}>{entry.votes}</Text>
                             </View>
-                          </View>
-                          <Text style={styles.voteCount}>{entry.votes}</Text>
-                        </View>
-                      ))
-                    ) : (
-                      <Text style={styles.panelText}>Essa enquete nao recebeu votos.</Text>
-                    )}
+                          ))
+                        ) : (
+                          <Text style={styles.panelText}>Essa enquete nao recebeu votos.</Text>
+                        )}
+                      </View>
+                    ))}
                   </View>
-                ))
-              ) : (
-                <Text style={styles.panelText}>Nenhuma enquete foi registrada nesse evento.</Text>
-              )}
-            </View>
+                ) : (
+                  <Text style={styles.panelText}>Nenhuma enquete foi registrada nesse evento.</Text>
+                ),
+            })}
 
-            {renderMatchesSection(item.matches, item.participants, false)}
+            {renderAccordionSection({
+              title: "Partidas",
+              subtitle: "Consulte os confrontos e os placares registrados nesse evento.",
+              isExpanded: isHistorySectionExpanded(item.event.id, "matches"),
+              onToggle: () => toggleHistorySection(item.event.id, "matches"),
+              children: renderMatchesSection(item.matches, item.participants, false),
+            })}
           </View>
         ) : null}
       </View>
@@ -2173,9 +2374,9 @@ export default function EventsScreen() {
       <ScrollView style={styles.screen} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
         <View style={styles.hero}>
           <Text style={styles.heroKicker}>Eventos</Text>
-          <Text style={styles.heroTitle}>O BoraJogar gira em torno do evento da semana.</Text>
+          <Text style={styles.heroTitle}>Acompanhe o evento da semana.</Text>
           <Text style={styles.heroSubtitle}>
-            Abra a chamada, monte o quorum, conduza enquetes, registre partidas e consulte o historico do grupo.
+            Veja a chamada atual, vote nas enquetes e acompanhe o historico do grupo.
           </Text>
         </View>
 
@@ -2202,16 +2403,20 @@ export default function EventsScreen() {
         {selectedAccess && overview ? (
           <>
             <View style={styles.summaryPanel}>
-              <View style={styles.summaryHeader}>
-                <View style={styles.flex}>
-                  <Text style={styles.panelTitle}>{selectedAccess.account.name}</Text>
-                  <Text style={styles.panelText}>{selectedAccess.roleLabel}</Text>
-                  <Text style={styles.panelText}>Modalidade: {overview.modality.name}</Text>
-                  {selectedAccess.priorityGroupName ? <Text style={styles.panelText}>Grupo prioritario: {selectedAccess.priorityGroupName}</Text> : null}
+              <Text style={styles.summaryKicker}>Conta ativa</Text>
+              <Text style={styles.summaryTitle}>{selectedAccess.account.name}</Text>
+              <View style={styles.summaryTags}>
+                <View style={styles.summaryTag}>
+                  <Text style={styles.summaryTagText}>{selectedAccess.roleLabel}</Text>
                 </View>
-                <Pressable onPress={() => router.push("/agenda")} style={styles.secondaryButton}>
-                  <Text style={styles.secondaryButtonText}>Configuracao</Text>
-                </Pressable>
+                <View style={styles.summaryTag}>
+                  <Text style={styles.summaryTagText}>{overview.modality.name}</Text>
+                </View>
+                {selectedAccess.priorityGroupName ? (
+                  <View style={styles.summaryTag}>
+                    <Text style={styles.summaryTagText}>{selectedAccess.priorityGroupName}</Text>
+                  </View>
+                ) : null}
               </View>
             </View>
 
@@ -2257,20 +2462,27 @@ export default function EventsScreen() {
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: "#f4f6ef" },
   content: { padding: 24, gap: 20, paddingBottom: 48 },
-  hero: { backgroundColor: "#173f2b", borderRadius: 32, padding: 24, gap: 12, overflow: "hidden" },
-  heroKicker: { color: "#d7ef57", fontSize: 16, fontWeight: "800", textTransform: "uppercase", letterSpacing: 1.6 },
-  heroTitle: { color: "#ffffff", fontSize: 36, lineHeight: 40, fontWeight: "900" },
-  heroSubtitle: { color: "#dce7dc", fontSize: 18, lineHeight: 28 },
+  hero: { backgroundColor: "#173f2b", borderRadius: 28, padding: 18, gap: 8, overflow: "hidden" },
+  heroKicker: { color: "#d7ef57", fontSize: 13, fontWeight: "800", textTransform: "uppercase", letterSpacing: 1.4 },
+  heroTitle: { color: "#ffffff", fontSize: 26, lineHeight: 30, fontWeight: "900" },
+  heroSubtitle: { color: "#dce7dc", fontSize: 15, lineHeight: 22 },
   accountSwitcher: { flexDirection: "row", flexWrap: "wrap", gap: 10 },
   accountChip: { borderRadius: 999, backgroundColor: "#e4ecde", paddingHorizontal: 16, paddingVertical: 10 },
   accountChipSelected: { backgroundColor: Colors.tint },
   accountChipText: { color: Colors.tint, fontWeight: "700" },
   accountChipTextSelected: { color: "#ffffff" },
-  summaryPanel: { backgroundColor: "#ffffff", borderRadius: 28, padding: 20, borderWidth: 1, borderColor: "#d8e2d2" },
+  summaryPanel: { backgroundColor: "#ffffff", borderRadius: 24, padding: 18, gap: 10, borderWidth: 1, borderColor: "#d8e2d2" },
   summaryHeader: { flexDirection: "row", gap: 12, alignItems: "flex-start" },
+  summaryKicker: { color: Colors.textMuted, fontSize: 12, fontWeight: "800", textTransform: "uppercase", letterSpacing: 1.1 },
+  summaryTitle: { color: Colors.text, fontSize: 24, fontWeight: "800" },
+  summaryTags: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  summaryTag: { borderRadius: 999, backgroundColor: "#edf4e7", paddingHorizontal: 12, paddingVertical: 8 },
+  summaryTagText: { color: Colors.tint, fontSize: 13, fontWeight: "800" },
   panel: { backgroundColor: "#ffffff", borderRadius: 28, padding: 20, gap: 12, borderWidth: 1, borderColor: "#d8e2d2" },
   section: { gap: 16 },
   sectionCard: { backgroundColor: "#ffffff", borderRadius: 24, padding: 18, gap: 14, borderWidth: 1, borderColor: "#d8e2d2" },
+  sectionStack: { gap: 12 },
+  accordionContent: { gap: 14 },
   panelTitle: { color: Colors.text, fontSize: 24, fontWeight: "800" },
   workspaceTitle: { color: Colors.text, fontSize: 22, fontWeight: "800" },
   panelText: { color: Colors.textMuted, fontSize: 16, lineHeight: 24 },
@@ -2294,11 +2506,17 @@ const styles = StyleSheet.create({
   inlineDangerButton: { backgroundColor: "#fbe7e2", borderRadius: 14, paddingHorizontal: 14, paddingVertical: 10 },
   inlineDangerText: { color: "#a24335", fontWeight: "800" },
   buttonDisabled: { opacity: 0.6 },
-  stateRail: { gap: 10 },
-  stateStep: { borderRadius: 16, backgroundColor: "#edf3e7", paddingHorizontal: 14, paddingVertical: 12 },
+  eventOverviewCard: { borderRadius: 20, backgroundColor: "#f8faf5", padding: 16, gap: 14, borderWidth: 1, borderColor: "#dfe7d8" },
+  eventCurrentTitle: { color: Colors.text, fontSize: 24, fontWeight: "800" },
+  metricRow: { flexDirection: "row", flexWrap: "wrap", gap: 10 },
+  metricPill: { minWidth: 96, flexGrow: 1, borderRadius: 16, backgroundColor: "#ffffff", paddingHorizontal: 14, paddingVertical: 12, borderWidth: 1, borderColor: "#dfe7d8", gap: 4 },
+  metricLabel: { color: Colors.textMuted, fontSize: 12, fontWeight: "700", textTransform: "uppercase" },
+  metricValue: { color: Colors.text, fontSize: 18, fontWeight: "900" },
+  stateRailCompact: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  statePill: { borderRadius: 999, backgroundColor: "#edf3e7", paddingHorizontal: 12, paddingVertical: 10 },
   stateStepCompleted: { backgroundColor: "#d9ebdd" },
   stateStepActive: { backgroundColor: "#dff6bf" },
-  stateStepLabel: { color: Colors.textMuted, fontWeight: "700" },
+  stateStepLabel: { color: Colors.textMuted, fontSize: 13, fontWeight: "700" },
   stateStepLabelActive: { color: Colors.text },
   weeklyBoard: { gap: 16 },
   weeklyColumn: { gap: 14 },
