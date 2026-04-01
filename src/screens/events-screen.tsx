@@ -630,6 +630,7 @@ export default function EventsScreen() {
   const { profile, memberships } = useAuth();
   const isSuperAdmin = Boolean(profile?.is_super_admin);
   const [superAdminAccounts, setSuperAdminAccounts] = useState<SportsAccount[]>([]);
+  const [isLoadingSuperAdminAccounts, setIsLoadingSuperAdminAccounts] = useState(false);
   const [selectedAccountId, setSelectedAccountId] = useState<string | null>(null);
   const [overview, setOverview] = useState<AccountOverview | null>(null);
   const [timeline, setTimeline] = useState<EventTimelineItem[]>([]);
@@ -680,8 +681,11 @@ export default function EventsScreen() {
     async function loadSuperAdminAccounts() {
       if (!isSuperAdmin) {
         setSuperAdminAccounts([]);
+        setIsLoadingSuperAdminAccounts(false);
         return;
       }
+
+      setIsLoadingSuperAdminAccounts(true);
 
       try {
         const nextAccounts = await listAllSportsAccounts();
@@ -692,6 +696,10 @@ export default function EventsScreen() {
       } catch (loadError) {
         if (isActive) {
           setMessage({ tone: "error", text: getReadableError(loadError) });
+        }
+      } finally {
+        if (isActive) {
+          setIsLoadingSuperAdminAccounts(false);
         }
       }
     }
@@ -748,6 +756,9 @@ export default function EventsScreen() {
     availableAccounts.find((item) => item.account.id === selectedAccountId) ?? null;
   const selectedMembership =
     memberships.find((item) => item.account.id === selectedAccountId) ?? null;
+  const isWaitingForVisibleAccounts =
+    isSuperAdmin &&
+    (isLoadingSuperAdminAccounts || (superAdminAccounts.length > 0 && !selectedAccess));
 
   const canManageWeeklyList = Boolean(
     profile?.is_super_admin || selectedMembership?.membership.role === "group_admin",
@@ -2948,7 +2959,14 @@ export default function EventsScreen() {
           </View>
         ) : null}
 
-        {!selectedAccess ? (
+        {isWaitingForVisibleAccounts ? (
+          <View style={styles.panel}>
+            <ActivityIndicator color={Colors.tint} />
+            <Text style={styles.panelText}>Carregando contas esportivas...</Text>
+          </View>
+        ) : null}
+
+        {!selectedAccess && !isWaitingForVisibleAccounts ? (
           <View style={styles.panel}>
             <Text style={styles.panelTitle}>Nenhuma conta esportiva visivel</Text>
             <Text style={styles.panelText}>Assim que houver uma conta vinculada, os eventos aparecerao aqui como timeline principal.</Text>
