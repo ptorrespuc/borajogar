@@ -2004,6 +2004,7 @@ export default function EventsScreen() {
               </View>
 
               <ScrollView
+                style={styles.modalScroll}
                 contentContainerStyle={styles.modalContent}
                 keyboardShouldPersistTaps="handled"
                 showsVerticalScrollIndicator={false}>
@@ -2254,6 +2255,7 @@ export default function EventsScreen() {
               </View>
 
               <ScrollView
+                style={styles.modalScroll}
                 contentContainerStyle={styles.modalContent}
                 keyboardShouldPersistTaps="handled"
                 showsVerticalScrollIndicator={false}>
@@ -2605,9 +2607,10 @@ const styles = StyleSheet.create({
   statusBadgeText: { color: Colors.tint, fontSize: 13, fontWeight: "800" },
   expandLabel: { color: Colors.textMuted, fontSize: 13, fontWeight: "700" },
   modalBackdrop: { flex: 1, backgroundColor: "rgba(17, 33, 24, 0.45)", justifyContent: "center", padding: 20 },
-  modalKeyboard: { width: "100%" },
-  modalCard: { maxHeight: "100%", width: "100%", alignSelf: "center", backgroundColor: "#ffffff", borderRadius: 28, padding: 18, gap: 12 },
+  modalKeyboard: { width: "100%", maxHeight: "100%", flexShrink: 1, justifyContent: "center" },
+  modalCard: { maxHeight: "100%", width: "100%", alignSelf: "center", backgroundColor: "#ffffff", borderRadius: 28, padding: 18, gap: 12, flexShrink: 1, minHeight: 0, overflow: "hidden" },
   modalTitle: { color: Colors.text, fontSize: 24, fontWeight: "800" },
+  modalScroll: { flexGrow: 0, flexShrink: 1, minHeight: 0 },
   modalContent: { gap: 18, paddingBottom: 12 },
   formSection: { gap: 14 },
   formSectionTitle: { color: Colors.text, fontSize: 18, fontWeight: "800" },
