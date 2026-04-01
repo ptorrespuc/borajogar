@@ -107,9 +107,15 @@ export type EventTimelineItem = {
   matches: EventMatchItem[];
 };
 
+export type EventMatchLineupPlayer = {
+  player: AccountPlayer;
+  assignedPosition: ModalityPosition | null;
+  sortOrder: number;
+};
+
 export type EventMatchTeamLineup = {
   team: EventMatchTeam;
-  players: AccountPlayer[];
+  players: EventMatchLineupPlayer[];
 };
 
 export type EventMatchItem = {
@@ -118,14 +124,19 @@ export type EventMatchItem = {
   awayTeam: EventMatchTeamLineup | null;
 };
 
+export type EventMatchLineupInput = {
+  playerId: string;
+  modalityPositionId: string | null;
+};
+
 export type CreateEventMatchInput = {
   eventId: string;
   title: string;
   createdBy: string;
   homeTeamName: string;
   awayTeamName: string;
-  homePlayerIds: string[];
-  awayPlayerIds: string[];
+  homePlayers: EventMatchLineupInput[];
+  awayPlayers: EventMatchLineupInput[];
 };
 
 export type UpdateEventMatchInput = {
@@ -137,8 +148,8 @@ export type UpdateEventMatchInput = {
   awayTeamName: string;
   homeScore: number;
   awayScore: number;
-  homePlayerIds: string[];
-  awayPlayerIds: string[];
+  homePlayers: EventMatchLineupInput[];
+  awayPlayers: EventMatchLineupInput[];
 };
 
 export type CreateAccountPlayerInput = {
@@ -317,7 +328,7 @@ const eventMatchTeamSelectFields =
   "id, match_id, side, name, score, source_team_id, created_at, updated_at";
 
 const eventMatchTeamPlayerSelectFields =
-  "id, team_id, account_player_id, sort_order, created_at";
+  "id, team_id, account_player_id, modality_position_id, sort_order, created_at";
 
 const accountPlayerSelectFields =
   "id, account_id, linked_profile_id, full_name, email, photo_url, age, rating, notes, priority_group_id, is_default_for_weekly_list, is_active, created_by, created_at, updated_at";
@@ -1926,8 +1937,18 @@ export async function upsertEventPollVote(input: UpsertEventPollVoteInput) {
   throwIfError(insertError);
 }
 
-async function replaceEventMatchTeamPlayers(teamId: string, orderedPlayerIds: string[]) {
-  const uniqueOrderedPlayerIds = [...new Set(orderedPlayerIds)];
+async function replaceEventMatchTeamPlayers(
+  teamId: string,
+  orderedPlayers: EventMatchLineupInput[],
+) {
+  const uniqueOrderedPlayers = orderedPlayers.reduce<EventMatchLineupInput[]>((accumulator, item) => {
+    if (accumulator.some((existing) => existing.playerId === item.playerId)) {
+      return accumulator;
+    }
+
+    accumulator.push(item);
+    return accumulator;
+  }, []);
 
   const { error: deleteError } = await supabase
     .from("event_match_team_players")
@@ -1936,14 +1957,15 @@ async function replaceEventMatchTeamPlayers(teamId: string, orderedPlayerIds: st
 
   throwIfError(deleteError);
 
-  if (uniqueOrderedPlayerIds.length === 0) {
+  if (uniqueOrderedPlayers.length === 0) {
     return;
   }
 
   const { error: insertError } = await supabase.from("event_match_team_players").insert(
-    uniqueOrderedPlayerIds.map((playerId, index) => ({
+    uniqueOrderedPlayers.map((item, index) => ({
       team_id: teamId,
-      account_player_id: playerId,
+      account_player_id: item.playerId,
+      modality_position_id: item.modalityPositionId,
       sort_order: index + 1,
     })),
   );
@@ -1997,21 +2019,45 @@ export async function listEventMatches(eventId: string): Promise<EventMatchItem[
 
   const teamPlayers = (teamPlayerData ?? []) as EventMatchTeamPlayer[];
   const playerIds = [...new Set(teamPlayers.map((item) => item.account_player_id))];
-  const { data: playerData, error: playerError } =
+  const positionIds = [
+    ...new Set(
+      teamPlayers
+        .map((item) => item.modality_position_id)
+        .filter((value): value is string => Boolean(value)),
+    ),
+  ];
+  const [
+    { data: playerData, error: playerError },
+    { data: positionData, error: positionError },
+  ] = await Promise.all([
     playerIds.length > 0
-      ? await supabase
+      ? supabase
           .from("account_players")
           .select(accountPlayerSelectFields)
           .in("id", playerIds)
       : {
           data: [] as AccountPlayer[],
           error: null as { message: string } | null,
-        };
+        },
+    positionIds.length > 0
+      ? supabase
+          .from("modality_positions")
+          .select("id, modality_id, name, code, sort_order, created_at, updated_at")
+          .in("id", positionIds)
+      : {
+          data: [] as ModalityPosition[],
+          error: null as { message: string } | null,
+        },
+  ]);
 
   throwIfError(playerError);
+  throwIfError(positionError);
 
   const playerMap = new Map(((playerData ?? []) as AccountPlayer[]).map((player) => [player.id, player]));
-  const playersByTeam = new Map<string, AccountPlayer[]>();
+  const positionMap = new Map(
+    ((positionData ?? []) as ModalityPosition[]).map((position) => [position.id, position]),
+  );
+  const playersByTeam = new Map<string, EventMatchLineupPlayer[]>();
 
   for (const teamPlayer of teamPlayers) {
     const player = playerMap.get(teamPlayer.account_player_id);
@@ -2021,7 +2067,13 @@ export async function listEventMatches(eventId: string): Promise<EventMatchItem[
     }
 
     const current = playersByTeam.get(teamPlayer.team_id) ?? [];
-    current.push(player);
+    current.push({
+      player,
+      assignedPosition: teamPlayer.modality_position_id
+        ? positionMap.get(teamPlayer.modality_position_id) ?? null
+        : null,
+      sortOrder: teamPlayer.sort_order,
+    });
     playersByTeam.set(teamPlayer.team_id, current);
   }
 
@@ -2115,8 +2167,8 @@ export async function createEventMatch(input: CreateEventMatchInput) {
   }
 
   await Promise.all([
-    replaceEventMatchTeamPlayers(homeTeam.id, input.homePlayerIds),
-    replaceEventMatchTeamPlayers(awayTeam.id, input.awayPlayerIds),
+    replaceEventMatchTeamPlayers(homeTeam.id, input.homePlayers),
+    replaceEventMatchTeamPlayers(awayTeam.id, input.awayPlayers),
   ]);
 
   return match;
@@ -2158,8 +2210,8 @@ export async function updateEventMatch(input: UpdateEventMatchInput) {
   throwIfError(teamError);
 
   await Promise.all([
-    replaceEventMatchTeamPlayers(input.homeTeamId, input.homePlayerIds),
-    replaceEventMatchTeamPlayers(input.awayTeamId, input.awayPlayerIds),
+    replaceEventMatchTeamPlayers(input.homeTeamId, input.homePlayers),
+    replaceEventMatchTeamPlayers(input.awayTeamId, input.awayPlayers),
   ]);
 }
 
@@ -2178,7 +2230,10 @@ export async function copyEventMatchTeamRoster(input: {
   const sourcePlayers = (data ?? []) as EventMatchTeamPlayer[];
   await replaceEventMatchTeamPlayers(
     input.targetTeamId,
-    sourcePlayers.map((item) => item.account_player_id),
+    sourcePlayers.map((item) => ({
+      playerId: item.account_player_id,
+      modalityPositionId: item.modality_position_id,
+    })),
   );
 
   const { error: teamError } = await supabase

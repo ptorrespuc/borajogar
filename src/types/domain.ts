@@ -269,6 +269,7 @@ export type EventMatchTeamPlayer = {
   id: string;
   team_id: string;
   account_player_id: string;
+  modality_position_id: string | null;
   sort_order: number;
   created_at: string;
 };

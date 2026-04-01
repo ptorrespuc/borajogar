@@ -30,6 +30,7 @@ import {
   listAccountPollTemplates,
   listAllSportsAccounts,
   listEventPollBallots,
+  listModalityPositions,
   removePlayerFromWeeklyEvent,
   updateEventMatch,
   upsertEventPollVote,
@@ -45,6 +46,7 @@ import { useAuth } from "@/src/providers/auth-provider";
 import type {
   AccountRole,
   Event,
+  ModalityPosition,
   PollSelectionMode,
   PollTemplate,
   SportsAccount,
@@ -88,6 +90,14 @@ type MatchModalState =
     };
 
 type EventSectionKey = "roster" | "polls" | "matches";
+
+type MatchAutoBalanceResult = {
+  homePlayerIds: string[];
+  awayPlayerIds: string[];
+  assignedPositionIds: Record<string, string | null>;
+  homeRating: number;
+  awayRating: number;
+};
 
 let eventPollOptionDraftCounter = 0;
 
@@ -303,6 +313,318 @@ function balanceMatchTeams(
   };
 }
 
+function buildDefaultMatchFormationCounts(
+  positions: ModalityPosition[],
+  playersPerTeam: number,
+): Record<string, string> {
+  const counts = Object.fromEntries(positions.map((position) => [position.id, "0"])) as Record<string, string>;
+
+  if (positions.length === 0 || playersPerTeam <= 0) {
+    return counts;
+  }
+
+  let remaining = playersPerTeam;
+  let index = 0;
+
+  while (remaining > 0) {
+    const position = positions[index % positions.length];
+    const currentValue = Number(counts[position.id] ?? "0");
+    counts[position.id] = String(currentValue + 1);
+    remaining -= 1;
+    index += 1;
+  }
+
+  return counts;
+}
+
+function buildMatchFormationCountsFromLineup(
+  positions: ModalityPosition[],
+  homePlayerIds: string[],
+  awayPlayerIds: string[],
+  assignedPositionIds: Record<string, string | null>,
+) {
+  const counts = Object.fromEntries(positions.map((position) => [position.id, "0"])) as Record<string, string>;
+
+  for (const position of positions) {
+    const homeCount = homePlayerIds.filter((playerId) => assignedPositionIds[playerId] === position.id).length;
+    const awayCount = awayPlayerIds.filter((playerId) => assignedPositionIds[playerId] === position.id).length;
+    const nextCount = Math.max(homeCount, awayCount);
+    counts[position.id] = String(nextCount);
+  }
+
+  return counts;
+}
+
+function parseMatchFormationCount(value: string | undefined) {
+  const normalized = value?.trim() ?? "";
+
+  if (!normalized) {
+    return 0;
+  }
+
+  const parsed = Number(normalized);
+
+  if (!Number.isInteger(parsed) || parsed < 0) {
+    return 0;
+  }
+
+  return parsed;
+}
+
+function getSelectedFormationPositions(
+  positions: ModalityPosition[],
+  formationCounts: Record<string, string>,
+) {
+  return positions
+    .map((position) => ({
+      position,
+      countPerTeam: parseMatchFormationCount(formationCounts[position.id]),
+    }))
+    .filter((item) => item.countPerTeam > 0);
+}
+
+function buildLineupInput(
+  playerIds: string[],
+  assignedPositionIds: Record<string, string | null>,
+) {
+  return playerIds.map((playerId) => ({
+    playerId,
+    modalityPositionId: assignedPositionIds[playerId] ?? null,
+  }));
+}
+
+function autoGenerateMatchTeamsByPositions(input: {
+  selectedPlayerIds: string[];
+  participants: WeeklyEventParticipantItem[];
+  positions: ModalityPosition[];
+  formationCounts: Record<string, string>;
+}): MatchAutoBalanceResult {
+  const selectedFormation = getSelectedFormationPositions(input.positions, input.formationCounts);
+  const playersPerTeam = selectedFormation.reduce((total, item) => total + item.countPerTeam, 0);
+
+  if (playersPerTeam === 0) {
+    throw new Error("Defina pelo menos uma posicao na formacao antes de gerar os times.");
+  }
+
+  const requiredPlayerCount = playersPerTeam * 2;
+  const uniqueSelectedPlayerIds = [...new Set(input.selectedPlayerIds)];
+
+  if (uniqueSelectedPlayerIds.length !== requiredPlayerCount) {
+    throw new Error(
+      `Selecione exatamente ${requiredPlayerCount} jogadores para preencher a formacao de ${playersPerTeam} por time.`,
+    );
+  }
+
+  const participantMap = new Map(
+    input.participants.map((participant, index) => [participant.player.id, { participant, order: index }]),
+  );
+  const formationPositionIds = selectedFormation.map((item) => item.position.id);
+  const selectedPlayers = uniqueSelectedPlayerIds
+    .map((playerId) => {
+      const entry = participantMap.get(playerId);
+
+      if (!entry) {
+        return null;
+      }
+
+      return {
+        id: playerId,
+        order: entry.order,
+        rating: getBalanceRating(entry.participant.player.rating),
+        preferredPositionIds: entry.participant.preferredPositions
+          .map((position) => position.id)
+          .filter((positionId) => formationPositionIds.includes(positionId)),
+      };
+    })
+    .filter(
+      (
+        item,
+      ): item is {
+        id: string;
+        order: number;
+        rating: number;
+        preferredPositionIds: string[];
+      } => item !== null,
+    );
+
+  const remainingSlots = new Map<string, number>(
+    selectedFormation.map((item) => [item.position.id, item.countPerTeam * 2]),
+  );
+  const assignedPositionIds = new Map<string, string>();
+
+  function getAvailableOptions(
+    player: {
+      id: string;
+      preferredPositionIds: string[];
+    },
+    unassignedPlayers: typeof selectedPlayers,
+  ) {
+    const preferredOptions = player.preferredPositionIds.filter(
+      (positionId) => (remainingSlots.get(positionId) ?? 0) > 0,
+    );
+
+    if (preferredOptions.length > 0) {
+      return preferredOptions.sort((first, second) => {
+        const firstEligible = unassignedPlayers.filter((candidate) =>
+          candidate.preferredPositionIds.includes(first),
+        ).length;
+        const secondEligible = unassignedPlayers.filter((candidate) =>
+          candidate.preferredPositionIds.includes(second),
+        ).length;
+        const firstRemaining = remainingSlots.get(first) ?? 0;
+        const secondRemaining = remainingSlots.get(second) ?? 0;
+
+        const firstScarcity = firstEligible - firstRemaining;
+        const secondScarcity = secondEligible - secondRemaining;
+
+        if (firstScarcity !== secondScarcity) {
+          return firstScarcity - secondScarcity;
+        }
+
+        return (
+          player.preferredPositionIds.indexOf(first) - player.preferredPositionIds.indexOf(second)
+        );
+      });
+    }
+
+    return selectedFormation
+      .map((item) => item.position.id)
+      .filter((positionId) => (remainingSlots.get(positionId) ?? 0) > 0)
+      .sort((first, second) => {
+        const firstRemaining = remainingSlots.get(first) ?? 0;
+        const secondRemaining = remainingSlots.get(second) ?? 0;
+
+        if (firstRemaining !== secondRemaining) {
+          return secondRemaining - firstRemaining;
+        }
+
+        const firstEligible = unassignedPlayers.filter((candidate) =>
+          candidate.preferredPositionIds.includes(first),
+        ).length;
+        const secondEligible = unassignedPlayers.filter((candidate) =>
+          candidate.preferredPositionIds.includes(second),
+        ).length;
+
+        return firstEligible - secondEligible;
+      });
+  }
+
+  function assignPositions(unassignedPlayers: typeof selectedPlayers): boolean {
+    if (unassignedPlayers.length === 0) {
+      return [...remainingSlots.values()].every((value) => value === 0);
+    }
+
+    const nextPlayer = [...unassignedPlayers]
+      .map((player) => ({
+        player,
+        options: getAvailableOptions(player, unassignedPlayers),
+      }))
+      .sort((first, second) => {
+        if (first.options.length !== second.options.length) {
+          return first.options.length - second.options.length;
+        }
+
+        if (second.player.preferredPositionIds.length !== first.player.preferredPositionIds.length) {
+          return second.player.preferredPositionIds.length - first.player.preferredPositionIds.length;
+        }
+
+        if (second.player.rating !== first.player.rating) {
+          return second.player.rating - first.player.rating;
+        }
+
+        return first.player.order - second.player.order;
+      })[0];
+
+    if (!nextPlayer || nextPlayer.options.length === 0) {
+      return false;
+    }
+
+    const remainingPlayers = unassignedPlayers.filter((player) => player.id !== nextPlayer.player.id);
+
+    for (const positionId of nextPlayer.options) {
+      remainingSlots.set(positionId, (remainingSlots.get(positionId) ?? 0) - 1);
+      assignedPositionIds.set(nextPlayer.player.id, positionId);
+
+      if (assignPositions(remainingPlayers)) {
+        return true;
+      }
+
+      assignedPositionIds.delete(nextPlayer.player.id);
+      remainingSlots.set(positionId, (remainingSlots.get(positionId) ?? 0) + 1);
+    }
+
+    return false;
+  }
+
+  if (!assignPositions(selectedPlayers)) {
+    throw new Error(
+      "Nao foi possivel distribuir todos os jogadores nas posicoes escolhidas. Revise as posicoes favoritas ou ajuste a formacao.",
+    );
+  }
+
+  const assignedPlayersByPosition = new Map<string, typeof selectedPlayers>();
+
+  for (const player of selectedPlayers) {
+    const positionId = assignedPositionIds.get(player.id);
+
+    if (!positionId) {
+      continue;
+    }
+
+    const current = assignedPlayersByPosition.get(positionId) ?? [];
+    current.push(player);
+    assignedPlayersByPosition.set(positionId, current);
+  }
+
+  const homePlayerIds: string[] = [];
+  const awayPlayerIds: string[] = [];
+  let homeRating = 0;
+  let awayRating = 0;
+
+  for (const { position, countPerTeam } of selectedFormation) {
+    const candidates = [...(assignedPlayersByPosition.get(position.id) ?? [])].sort((first, second) => {
+      if (second.rating !== first.rating) {
+        return second.rating - first.rating;
+      }
+
+      return first.order - second.order;
+    });
+
+    let homeRemaining = countPerTeam;
+    let awayRemaining = countPerTeam;
+
+    for (const candidate of candidates) {
+      const shouldUseHome =
+        awayRemaining === 0
+          ? true
+          : homeRemaining === 0
+            ? false
+            : homeRating === awayRating
+              ? homePlayerIds.length <= awayPlayerIds.length
+              : homeRating < awayRating;
+
+      if (shouldUseHome) {
+        homePlayerIds.push(candidate.id);
+        homeRating += candidate.rating;
+        homeRemaining -= 1;
+        continue;
+      }
+
+      awayPlayerIds.push(candidate.id);
+      awayRating += candidate.rating;
+      awayRemaining -= 1;
+    }
+  }
+
+  return {
+    homePlayerIds,
+    awayPlayerIds,
+    assignedPositionIds: Object.fromEntries(assignedPositionIds.entries()),
+    homeRating: Number(homeRating.toFixed(2)),
+    awayRating: Number(awayRating.toFixed(2)),
+  };
+}
+
 export default function EventsScreen() {
   const insets = useSafeAreaInsets();
   const { profile, memberships } = useAuth();
@@ -311,6 +633,7 @@ export default function EventsScreen() {
   const [selectedAccountId, setSelectedAccountId] = useState<string | null>(null);
   const [overview, setOverview] = useState<AccountOverview | null>(null);
   const [timeline, setTimeline] = useState<EventTimelineItem[]>([]);
+  const [modalityPositions, setModalityPositions] = useState<ModalityPosition[]>([]);
   const [accountPlayers, setAccountPlayers] = useState<AccountPlayerAdminItem[]>([]);
   const [accountPollTemplates, setAccountPollTemplates] = useState<PollTemplate[]>([]);
   const [eventPollBallots, setEventPollBallots] = useState<EventPollBallot[]>([]);
@@ -348,6 +671,8 @@ export default function EventsScreen() {
   const [matchSelectedPlayerIds, setMatchSelectedPlayerIds] = useState<string[]>([]);
   const [matchHomePlayerIds, setMatchHomePlayerIds] = useState<string[]>([]);
   const [matchAwayPlayerIds, setMatchAwayPlayerIds] = useState<string[]>([]);
+  const [matchAssignedPositionIds, setMatchAssignedPositionIds] = useState<Record<string, string | null>>({});
+  const [matchFormationCounts, setMatchFormationCounts] = useState<Record<string, string>>({});
 
   useEffect(() => {
     let isActive = true;
@@ -458,6 +783,7 @@ export default function EventsScreen() {
     if (!selectedAccess) {
       setOverview(null);
       setTimeline([]);
+      setModalityPositions([]);
       setAccountPlayers([]);
       setAccountPollTemplates([]);
       setEventPollBallots([]);
@@ -469,7 +795,7 @@ export default function EventsScreen() {
 
     try {
       const nextOverview = await getAccountOverview(selectedAccess.account.id);
-      const [nextTimeline, nextPlayers, nextTemplates] = await Promise.all([
+      const [nextTimeline, nextPlayers, nextTemplates, nextPositions] = await Promise.all([
         listAccountEventTimeline(selectedAccess.account.id, nextOverview.account.modality_id),
         canManageWeeklyList
           ? listAccountPlayers(selectedAccess.account.id, nextOverview.account.modality_id)
@@ -477,6 +803,7 @@ export default function EventsScreen() {
         canManageWeeklyPolls
           ? listAccountPollTemplates(selectedAccess.account.id)
           : Promise.resolve([] as PollTemplate[]),
+        listModalityPositions(nextOverview.account.modality_id),
       ]);
 
       const nextViewerParticipantId = findViewerParticipantId(nextTimeline);
@@ -492,6 +819,7 @@ export default function EventsScreen() {
 
       setOverview(nextOverview);
       setTimeline(nextTimeline);
+      setModalityPositions(nextPositions);
       setAccountPlayers(nextPlayers);
       setAccountPollTemplates(nextTemplates);
       setEventPollBallots(nextBallots);
@@ -507,6 +835,7 @@ export default function EventsScreen() {
     } catch (loadError) {
       setOverview(null);
       setTimeline([]);
+      setModalityPositions([]);
       setAccountPlayers([]);
       setAccountPollTemplates([]);
       setEventPollBallots([]);
@@ -524,6 +853,7 @@ export default function EventsScreen() {
       if (!selectedAccess) {
         setOverview(null);
         setTimeline([]);
+        setModalityPositions([]);
         setAccountPlayers([]);
         setAccountPollTemplates([]);
         setEventPollBallots([]);
@@ -1011,6 +1341,8 @@ export default function EventsScreen() {
     setMatchSelectedPlayerIds([]);
     setMatchHomePlayerIds([]);
     setMatchAwayPlayerIds([]);
+    setMatchAssignedPositionIds({});
+    setMatchFormationCounts(buildDefaultMatchFormationCounts(modalityPositions, overview?.modality.players_per_team ?? 0));
   }
 
   function openCreateMatchModal() {
@@ -1026,10 +1358,16 @@ export default function EventsScreen() {
   function openEditMatchModal(matchItem: EventMatchItem) {
     const selectedPlayerIds = [
       ...new Set([
-        ...(matchItem.homeTeam?.players.map((player) => player.id) ?? []),
-        ...(matchItem.awayTeam?.players.map((player) => player.id) ?? []),
+        ...(matchItem.homeTeam?.players.map((lineup) => lineup.player.id) ?? []),
+        ...(matchItem.awayTeam?.players.map((lineup) => lineup.player.id) ?? []),
       ]),
     ];
+    const assignedPositionIds = Object.fromEntries(
+      [
+        ...(matchItem.homeTeam?.players ?? []),
+        ...(matchItem.awayTeam?.players ?? []),
+      ].map((lineup) => [lineup.player.id, lineup.assignedPosition?.id ?? null]),
+    ) as Record<string, string | null>;
 
     setMatchModal({ mode: "edit", targetId: matchItem.match.id });
     setMatchTitleDraft(matchItem.match.title);
@@ -1038,8 +1376,17 @@ export default function EventsScreen() {
     setMatchHomeScoreDraft(String(matchItem.homeTeam?.team.score ?? 0));
     setMatchAwayScoreDraft(String(matchItem.awayTeam?.team.score ?? 0));
     setMatchSelectedPlayerIds(selectedPlayerIds);
-    setMatchHomePlayerIds(matchItem.homeTeam?.players.map((player) => player.id) ?? []);
-    setMatchAwayPlayerIds(matchItem.awayTeam?.players.map((player) => player.id) ?? []);
+    setMatchHomePlayerIds(matchItem.homeTeam?.players.map((lineup) => lineup.player.id) ?? []);
+    setMatchAwayPlayerIds(matchItem.awayTeam?.players.map((lineup) => lineup.player.id) ?? []);
+    setMatchAssignedPositionIds(assignedPositionIds);
+    setMatchFormationCounts(
+      buildMatchFormationCountsFromLineup(
+        modalityPositions,
+        matchItem.homeTeam?.players.map((lineup) => lineup.player.id) ?? [],
+        matchItem.awayTeam?.players.map((lineup) => lineup.player.id) ?? [],
+        assignedPositionIds,
+      ),
+    );
   }
 
   function closeMatchModal() {
@@ -1055,6 +1402,11 @@ export default function EventsScreen() {
       setMatchSelectedPlayerIds((currentValue) => currentValue.filter((id) => id !== playerId));
       setMatchHomePlayerIds((currentValue) => currentValue.filter((id) => id !== playerId));
       setMatchAwayPlayerIds((currentValue) => currentValue.filter((id) => id !== playerId));
+      setMatchAssignedPositionIds((currentValue) => {
+        const nextValue = { ...currentValue };
+        delete nextValue[playerId];
+        return nextValue;
+      });
       return;
     }
 
@@ -1095,7 +1447,10 @@ export default function EventsScreen() {
       return;
     }
 
-    const sourceIds = sourceTeam.players.map((player) => player.id);
+    const sourceIds = sourceTeam.players.map((lineup) => lineup.player.id);
+    const sourceAssignedPositionIds = Object.fromEntries(
+      sourceTeam.players.map((lineup) => [lineup.player.id, lineup.assignedPosition?.id ?? null]),
+    ) as Record<string, string | null>;
 
     if (side === "home") {
       setMatchHomeTeamNameDraft(sourceTeam.team.name);
@@ -1104,6 +1459,10 @@ export default function EventsScreen() {
       setMatchSelectedPlayerIds((currentValue) => [
         ...new Set([...currentValue.filter((id) => !sourceIds.includes(id)), ...sourceIds]),
       ]);
+      setMatchAssignedPositionIds((currentValue) => ({
+        ...currentValue,
+        ...sourceAssignedPositionIds,
+      }));
       return;
     }
 
@@ -1113,6 +1472,18 @@ export default function EventsScreen() {
     setMatchSelectedPlayerIds((currentValue) => [
       ...new Set([...currentValue.filter((id) => !sourceIds.includes(id)), ...sourceIds]),
     ]);
+    setMatchAssignedPositionIds((currentValue) => ({
+      ...currentValue,
+      ...sourceAssignedPositionIds,
+    }));
+  }
+
+  function updateMatchFormationCount(positionId: string, value: string) {
+    const nextValue = value.replace(/[^0-9]/g, "");
+    setMatchFormationCounts((currentValue) => ({
+      ...currentValue,
+      [positionId]: nextValue,
+    }));
   }
 
   function handleBalanceSelectedPlayers() {
@@ -1129,10 +1500,32 @@ export default function EventsScreen() {
     const balancedTeams = balanceMatchTeams(selectedIds, activeParticipants);
     setMatchHomePlayerIds(balancedTeams.homePlayerIds);
     setMatchAwayPlayerIds(balancedTeams.awayPlayerIds);
+    setMatchAssignedPositionIds({});
     setMessage({
       tone: "success",
       text: `Times balanceados pela nota: ${balancedTeams.homeRating.toFixed(2)} x ${balancedTeams.awayRating.toFixed(2)}.`,
     });
+  }
+
+  function handleAutoGenerateMatch() {
+    try {
+      const generatedTeams = autoGenerateMatchTeamsByPositions({
+        selectedPlayerIds: matchSelectedPlayerIds,
+        participants: activeParticipants,
+        positions: modalityPositions,
+        formationCounts: matchFormationCounts,
+      });
+
+      setMatchHomePlayerIds(generatedTeams.homePlayerIds);
+      setMatchAwayPlayerIds(generatedTeams.awayPlayerIds);
+      setMatchAssignedPositionIds(generatedTeams.assignedPositionIds);
+      setMessage({
+        tone: "success",
+        text: `Times gerados automaticamente: ${generatedTeams.homeRating.toFixed(2)} x ${generatedTeams.awayRating.toFixed(2)}.`,
+      });
+    } catch (generationError) {
+      setMessage({ tone: "error", text: getReadableError(generationError) });
+    }
   }
 
   async function handleSaveMatch() {
@@ -1200,8 +1593,8 @@ export default function EventsScreen() {
           awayTeamName: matchAwayTeamNameDraft.trim() || "Time B",
           homeScore,
           awayScore,
-          homePlayerIds: matchHomePlayerIds,
-          awayPlayerIds: matchAwayPlayerIds,
+          homePlayers: buildLineupInput(matchHomePlayerIds, matchAssignedPositionIds),
+          awayPlayers: buildLineupInput(matchAwayPlayerIds, matchAssignedPositionIds),
         });
       } else {
         await createEventMatch({
@@ -1210,8 +1603,8 @@ export default function EventsScreen() {
           createdBy: profile.id,
           homeTeamName: matchHomeTeamNameDraft.trim() || "Time A",
           awayTeamName: matchAwayTeamNameDraft.trim() || "Time B",
-          homePlayerIds: matchHomePlayerIds,
-          awayPlayerIds: matchAwayPlayerIds,
+          homePlayers: buildLineupInput(matchHomePlayerIds, matchAssignedPositionIds),
+          awayPlayers: buildLineupInput(matchAwayPlayerIds, matchAssignedPositionIds),
         });
       }
 
@@ -1519,20 +1912,29 @@ export default function EventsScreen() {
                     <Text style={styles.selectionCardText}>
                       Nota total{" "}
                       {calculateTeamRating(
-                        (matchItem.homeTeam?.players ?? []).map((player) => player.id),
+                        (matchItem.homeTeam?.players ?? []).map((lineup) => lineup.player.id),
                         participants,
                       ).toFixed(2)}
                     </Text>
                     {(matchItem.homeTeam?.players ?? []).length > 0 ? (
-                      (matchItem.homeTeam?.players ?? []).map((player) => (
-                        <View key={`${matchItem.match.id}-home-${player.id}`} style={styles.matchPlayerRow}>
-                          <PlayerAvatar name={player.full_name} photoUrl={player.photo_url} size={30} />
-                          <Text style={styles.selectionCardText}>{player.full_name}</Text>
-                      </View>
-                    ))
-                  ) : (
-                    <Text style={styles.panelText}>Sem jogadores escalados.</Text>
-                  )}
+                      (matchItem.homeTeam?.players ?? []).map((lineup) => (
+                        <View key={`${matchItem.match.id}-home-${lineup.player.id}`} style={styles.matchPlayerRow}>
+                          <PlayerAvatar
+                            name={lineup.player.full_name}
+                            photoUrl={lineup.player.photo_url}
+                            size={30}
+                          />
+                          <View style={styles.flex}>
+                            <Text style={styles.selectionCardText}>{lineup.player.full_name}</Text>
+                            {lineup.assignedPosition ? (
+                              <Text style={styles.eventPersonMeta}>{lineup.assignedPosition.name}</Text>
+                            ) : null}
+                          </View>
+                        </View>
+                      ))
+                    ) : (
+                      <Text style={styles.panelText}>Sem jogadores escalados.</Text>
+                    )}
                 </View>
 
                 <View style={styles.selectionCard}>
@@ -1540,15 +1942,24 @@ export default function EventsScreen() {
                   <Text style={styles.selectionCardText}>
                     Nota total{" "}
                     {calculateTeamRating(
-                      (matchItem.awayTeam?.players ?? []).map((player) => player.id),
+                      (matchItem.awayTeam?.players ?? []).map((lineup) => lineup.player.id),
                       participants,
                     ).toFixed(2)}
                   </Text>
                   {(matchItem.awayTeam?.players ?? []).length > 0 ? (
-                    (matchItem.awayTeam?.players ?? []).map((player) => (
-                      <View key={`${matchItem.match.id}-away-${player.id}`} style={styles.matchPlayerRow}>
-                        <PlayerAvatar name={player.full_name} photoUrl={player.photo_url} size={30} />
-                        <Text style={styles.selectionCardText}>{player.full_name}</Text>
+                    (matchItem.awayTeam?.players ?? []).map((lineup) => (
+                      <View key={`${matchItem.match.id}-away-${lineup.player.id}`} style={styles.matchPlayerRow}>
+                        <PlayerAvatar
+                          name={lineup.player.full_name}
+                          photoUrl={lineup.player.photo_url}
+                          size={30}
+                        />
+                        <View style={styles.flex}>
+                          <Text style={styles.selectionCardText}>{lineup.player.full_name}</Text>
+                          {lineup.assignedPosition ? (
+                            <Text style={styles.eventPersonMeta}>{lineup.assignedPosition.name}</Text>
+                          ) : null}
+                        </View>
                       </View>
                     ))
                   ) : (
@@ -2220,9 +2631,15 @@ export default function EventsScreen() {
         item.awayTeam ? { id: item.awayTeam.team.id, label: `${item.match.title} | ${item.awayTeam.team.name}` } : null,
       ])
       .filter((item): item is { id: string; label: string } => item !== null);
+    const positionNameById = new Map(modalityPositions.map((position) => [position.id, position.name]));
     const selectedParticipants = activeParticipants.filter((item) =>
       matchSelectedPlayerIds.includes(item.player.id),
     );
+    const selectedFormation = getSelectedFormationPositions(modalityPositions, matchFormationCounts);
+    const playersPerTeamTarget = selectedFormation.reduce((total, item) => total + item.countPerTeam, 0);
+    const requiredSelectedCount = playersPerTeamTarget * 2;
+    const selectedCountMatchesFormation =
+      playersPerTeamTarget > 0 && selectedParticipants.length === requiredSelectedCount;
     const unassignedSelectedCount = selectedParticipants.filter(
       (item) =>
         !matchHomePlayerIds.includes(item.player.id) && !matchAwayPlayerIds.includes(item.player.id),
@@ -2275,6 +2692,64 @@ export default function EventsScreen() {
                 </View>
 
                 <View style={styles.formSection}>
+                  <Text style={styles.formSectionTitle}>Montagem automatica por posicao</Text>
+                  <Text style={styles.fieldHint}>
+                    Defina quantos jogadores cada time precisa em cada posicao. Depois selecione exatamente {requiredSelectedCount || "o total"} jogadores e gere os dois times.
+                  </Text>
+
+                  {modalityPositions.length > 0 ? (
+                    <View style={styles.positionGrid}>
+                      {modalityPositions.map((position) => (
+                        <View key={position.id} style={styles.positionCountCard}>
+                          <Text style={styles.positionCountTitle}>{position.name}</Text>
+                          <TextInput
+                            value={matchFormationCounts[position.id] ?? "0"}
+                            onChangeText={(value) => updateMatchFormationCount(position.id, value)}
+                            keyboardType="number-pad"
+                            style={styles.positionCountInput}
+                          />
+                          <Text style={styles.positionCountHint}>por time</Text>
+                        </View>
+                      ))}
+                    </View>
+                  ) : (
+                    <Text style={styles.panelText}>Cadastre as posicoes da modalidade antes de usar a montagem automatica.</Text>
+                  )}
+
+                  <Text style={styles.selectionSummary}>
+                    Formacao por time: {playersPerTeamTarget} jogador(es) | Necessario para 2 times: {requiredSelectedCount}
+                  </Text>
+                  <Text style={styles.fieldHint}>
+                    {selectedParticipants.length === 0
+                      ? "Selecione os jogadores do quorum que vao entrar nessa partida."
+                      : selectedCountMatchesFormation
+                        ? "Quantidade selecionada pronta para gerar automaticamente."
+                        : `Voce selecionou ${selectedParticipants.length} jogador(es). Ajuste para ${requiredSelectedCount} ou altere a formacao.`}
+                  </Text>
+
+                  <View style={styles.listActions}>
+                    <Pressable
+                      onPress={() =>
+                        setMatchFormationCounts(
+                          buildDefaultMatchFormationCounts(
+                            modalityPositions,
+                            overview?.modality.players_per_team ?? 0,
+                          ),
+                        )
+                      }
+                      style={styles.secondaryButton}>
+                      <Text style={styles.secondaryButtonText}>Usar formacao padrao</Text>
+                    </Pressable>
+                    <Pressable
+                      onPress={handleAutoGenerateMatch}
+                      disabled={!selectedCountMatchesFormation}
+                      style={[styles.secondaryButton, !selectedCountMatchesFormation && styles.buttonDisabled]}>
+                      <Text style={styles.secondaryButtonText}>Montar 2 times</Text>
+                    </Pressable>
+                  </View>
+                </View>
+
+                <View style={styles.formSection}>
                   <Text style={styles.formSectionTitle}>Jogadores desta partida</Text>
                   <Text style={styles.fieldHint}>
                     Marque quem entrou nesse jogo antes de dividir os times. Jogadores sem nota contam como 5,00 no balanceamento automatico.
@@ -2290,14 +2765,15 @@ export default function EventsScreen() {
                       <Text style={styles.secondaryButtonText}>Usar quorum inteiro</Text>
                     </Pressable>
                     <Pressable
-                      onPress={() => {
-                        setMatchSelectedPlayerIds([]);
-                        setMatchHomePlayerIds([]);
-                        setMatchAwayPlayerIds([]);
-                      }}
-                      style={styles.secondaryButton}>
-                      <Text style={styles.secondaryButtonText}>Limpar selecao</Text>
-                    </Pressable>
+                        onPress={() => {
+                          setMatchSelectedPlayerIds([]);
+                          setMatchHomePlayerIds([]);
+                          setMatchAwayPlayerIds([]);
+                          setMatchAssignedPositionIds({});
+                        }}
+                        style={styles.secondaryButton}>
+                        <Text style={styles.secondaryButtonText}>Limpar selecao</Text>
+                      </Pressable>
                     <Pressable
                       onPress={handleBalanceSelectedPlayers}
                       disabled={matchSelectedPlayerIds.length < 2}
@@ -2320,6 +2796,10 @@ export default function EventsScreen() {
                   <View style={styles.selectionList}>
                     {activeParticipants.map((item) => {
                       const isSelected = matchSelectedPlayerIds.includes(item.player.id);
+                      const assignedPositionId = matchAssignedPositionIds[item.player.id];
+                      const assignedPositionLabel = assignedPositionId
+                        ? positionNameById.get(assignedPositionId) ?? "Posicao definida"
+                        : null;
                       const teamLabel = matchHomePlayerIds.includes(item.player.id)
                         ? matchHomeTeamNameDraft.trim() || "Time A"
                         : matchAwayPlayerIds.includes(item.player.id)
@@ -2341,7 +2821,10 @@ export default function EventsScreen() {
                                   ? `${item.priorityGroup.priority_rank}. ${item.priorityGroup.name}`
                                   : "Sem prioridade"}
                               </Text>
-                              <Text style={styles.playerPickerMeta}>{teamLabel}</Text>
+                              <Text style={styles.playerPickerMeta}>
+                                {teamLabel}
+                                {assignedPositionLabel ? ` | ${assignedPositionLabel}` : ""}
+                              </Text>
                             </View>
                           </View>
                         </Pressable>
@@ -2374,7 +2857,12 @@ export default function EventsScreen() {
                       const isSelected = matchHomePlayerIds.includes(item.player.id);
                       return (
                         <Pressable key={`home-${item.player.id}`} onPress={() => toggleMatchPlayer("home", item.player.id)} style={[styles.chip, isSelected && styles.chipSelected]}>
-                          <Text style={[styles.chipText, isSelected && styles.chipTextSelected]}>{item.player.full_name}</Text>
+                          <Text style={[styles.chipText, isSelected && styles.chipTextSelected]}>
+                            {item.player.full_name}
+                            {matchAssignedPositionIds[item.player.id]
+                              ? ` · ${positionNameById.get(matchAssignedPositionIds[item.player.id] ?? "") ?? ""}`
+                              : ""}
+                          </Text>
                         </Pressable>
                       );
                       })}
@@ -2408,7 +2896,12 @@ export default function EventsScreen() {
                       const isSelected = matchAwayPlayerIds.includes(item.player.id);
                       return (
                         <Pressable key={`away-${item.player.id}`} onPress={() => toggleMatchPlayer("away", item.player.id)} style={[styles.chip, isSelected && styles.chipSelected]}>
-                          <Text style={[styles.chipText, isSelected && styles.chipTextSelected]}>{item.player.full_name}</Text>
+                          <Text style={[styles.chipText, isSelected && styles.chipTextSelected]}>
+                            {item.player.full_name}
+                            {matchAssignedPositionIds[item.player.id]
+                              ? ` · ${positionNameById.get(matchAssignedPositionIds[item.player.id] ?? "") ?? ""}`
+                              : ""}
+                          </Text>
                         </Pressable>
                       );
                       })}
@@ -2619,6 +3112,11 @@ const styles = StyleSheet.create({
   label: { color: Colors.text, fontSize: 14, fontWeight: "700" },
   input: { borderRadius: 18, borderWidth: 1, borderColor: "#d5dfd1", backgroundColor: "#f8faf5", paddingHorizontal: 16, paddingVertical: 14, color: Colors.text, fontSize: 16 },
   multilineInput: { minHeight: 96, textAlignVertical: "top" },
+  positionGrid: { flexDirection: "row", flexWrap: "wrap", gap: 10 },
+  positionCountCard: { width: "31%", minWidth: 96, borderRadius: 18, borderWidth: 1, borderColor: "#dfe7d8", backgroundColor: "#f8faf5", padding: 12, gap: 8 },
+  positionCountTitle: { color: Colors.text, fontSize: 13, fontWeight: "800" },
+  positionCountInput: { borderRadius: 14, borderWidth: 1, borderColor: "#d5dfd1", backgroundColor: "#ffffff", paddingHorizontal: 12, paddingVertical: 10, color: Colors.text, fontSize: 16, fontWeight: "700", textAlign: "center" },
+  positionCountHint: { color: Colors.textMuted, fontSize: 12 },
   selectionSummary: { color: Colors.tint, fontSize: 13, fontWeight: "800" },
   selectionList: { gap: 10 },
   playerPickerCard: { borderRadius: 18, borderWidth: 1, borderColor: "#dfe7d8", backgroundColor: "#f8faf5", padding: 14 },

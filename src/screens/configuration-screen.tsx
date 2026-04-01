@@ -2549,8 +2549,8 @@ export default function HomeScreen() {
     setMatchAwayTeamNameDraft(matchItem.awayTeam?.team.name ?? "Time B");
     setMatchHomeScoreDraft(String(matchItem.homeTeam?.team.score ?? 0));
     setMatchAwayScoreDraft(String(matchItem.awayTeam?.team.score ?? 0));
-    setMatchHomePlayerIds(matchItem.homeTeam?.players.map((player) => player.id) ?? []);
-    setMatchAwayPlayerIds(matchItem.awayTeam?.players.map((player) => player.id) ?? []);
+    setMatchHomePlayerIds(matchItem.homeTeam?.players.map((lineup) => lineup.player.id) ?? []);
+    setMatchAwayPlayerIds(matchItem.awayTeam?.players.map((lineup) => lineup.player.id) ?? []);
     setIsMatchModalLoading(false);
   }
 
@@ -2591,7 +2591,7 @@ export default function HomeScreen() {
       return;
     }
 
-    const sourceIds = sourceTeam.players.map((player) => player.id);
+    const sourceIds = sourceTeam.players.map((lineup) => lineup.player.id);
 
     if (side === "home") {
       setMatchHomeTeamNameDraft(sourceTeam.team.name);
@@ -2643,8 +2643,14 @@ export default function HomeScreen() {
           awayTeamName: matchAwayTeamNameDraft.trim() || "Time B",
           homeScore,
           awayScore,
-          homePlayerIds: matchHomePlayerIds,
-          awayPlayerIds: matchAwayPlayerIds,
+          homePlayers: matchHomePlayerIds.map((playerId) => ({
+            playerId,
+            modalityPositionId: null,
+          })),
+          awayPlayers: matchAwayPlayerIds.map((playerId) => ({
+            playerId,
+            modalityPositionId: null,
+          })),
         });
       } else if (profile) {
         await createEventMatch({
@@ -2653,8 +2659,14 @@ export default function HomeScreen() {
           createdBy: profile.id,
           homeTeamName: matchHomeTeamNameDraft.trim() || "Time A",
           awayTeamName: matchAwayTeamNameDraft.trim() || "Time B",
-          homePlayerIds: matchHomePlayerIds,
-          awayPlayerIds: matchAwayPlayerIds,
+          homePlayers: matchHomePlayerIds.map((playerId) => ({
+            playerId,
+            modalityPositionId: null,
+          })),
+          awayPlayers: matchAwayPlayerIds.map((playerId) => ({
+            playerId,
+            modalityPositionId: null,
+          })),
         });
       }
 
@@ -4297,10 +4309,10 @@ export default function HomeScreen() {
                   <View style={styles.weeklyColumn}>
                     <Text style={styles.selectionCardTitle}>{matchItem.homeTeam?.team.name ?? "Time A"}</Text>
                     {(matchItem.homeTeam?.players ?? []).length > 0 ? (
-                      (matchItem.homeTeam?.players ?? []).map((player) => (
-                        <View key={`${matchItem.match.id}-home-${player.id}`} style={styles.matchPlayerRow}>
-                          <PlayerAvatar name={player.full_name} photoUrl={player.photo_url} size={32} />
-                          <Text style={styles.selectionCardText}>{player.full_name}</Text>
+                      (matchItem.homeTeam?.players ?? []).map((lineup) => (
+                        <View key={`${matchItem.match.id}-home-${lineup.player.id}`} style={styles.matchPlayerRow}>
+                          <PlayerAvatar name={lineup.player.full_name} photoUrl={lineup.player.photo_url} size={32} />
+                          <Text style={styles.selectionCardText}>{lineup.player.full_name}</Text>
                         </View>
                       ))
                     ) : (
@@ -4311,10 +4323,10 @@ export default function HomeScreen() {
                   <View style={styles.weeklyColumn}>
                     <Text style={styles.selectionCardTitle}>{matchItem.awayTeam?.team.name ?? "Time B"}</Text>
                     {(matchItem.awayTeam?.players ?? []).length > 0 ? (
-                      (matchItem.awayTeam?.players ?? []).map((player) => (
-                        <View key={`${matchItem.match.id}-away-${player.id}`} style={styles.matchPlayerRow}>
-                          <PlayerAvatar name={player.full_name} photoUrl={player.photo_url} size={32} />
-                          <Text style={styles.selectionCardText}>{player.full_name}</Text>
+                      (matchItem.awayTeam?.players ?? []).map((lineup) => (
+                        <View key={`${matchItem.match.id}-away-${lineup.player.id}`} style={styles.matchPlayerRow}>
+                          <PlayerAvatar name={lineup.player.full_name} photoUrl={lineup.player.photo_url} size={32} />
+                          <Text style={styles.selectionCardText}>{lineup.player.full_name}</Text>
                         </View>
                       ))
                     ) : (
