@@ -433,7 +433,7 @@ export default function HomeScreen() {
   const [overview, setOverview] = useState<AccountOverview | null>(null);
   const [overviewError, setOverviewError] = useState<string | null>(null);
   const [isOverviewLoading, setIsOverviewLoading] = useState(false);
-  const [workspaceTab, setWorkspaceTab] = useState<AccountWorkspaceTab>("players");
+  const [workspaceTab, setWorkspaceTab] = useState<AccountWorkspaceTab>("polls");
   const [accountPlayers, setAccountPlayers] = useState<AccountPlayerAdminItem[]>([]);
   const [accountPollTemplates, setAccountPollTemplates] = useState<PollTemplate[]>([]);
   const [modalityPositions, setModalityPositions] = useState<ModalityPosition[]>([]);
@@ -4873,7 +4873,7 @@ export default function HomeScreen() {
             </Text>
             <Text style={styles.panelText}>
               {isSuperAdmin
-                ? "Edicao da conta fica separada. Aqui voce administra jogadores e modelos recorrentes da conta."
+                ? "Edicao da conta fica separada. Aqui voce administra a conta e os modelos recorrentes de enquete."
                 : "A operacao do evento atual agora fica na aba Eventos. Esta tela concentra apenas os cadastros e configuracoes do grupo."}
             </Text>
           </View>
@@ -4883,25 +4883,6 @@ export default function HomeScreen() {
             </Pressable>
           ) : null}
         </View>
-
-        {canManageAccount ? (
-          <View style={styles.tabRow}>
-            <Pressable
-              onPress={() => setWorkspaceTab("players")}
-              style={[styles.tabButton, workspaceTab === "players" && styles.tabButtonActive]}>
-              <Text style={[styles.tabText, workspaceTab === "players" && styles.tabTextActive]}>
-                Jogadores
-              </Text>
-            </Pressable>
-            <Pressable
-              onPress={() => setWorkspaceTab("polls")}
-              style={[styles.tabButton, workspaceTab === "polls" && styles.tabButtonActive]}>
-              <Text style={[styles.tabText, workspaceTab === "polls" && styles.tabTextActive]}>
-                Enquetes
-              </Text>
-            </Pressable>
-          </View>
-        ) : null}
 
         {isWorkspaceLoading ? (
           <View style={styles.workspaceLoading}>
@@ -4915,73 +4896,6 @@ export default function HomeScreen() {
               A chamada semanal, as enquetes do evento e as partidas agora ficam centralizadas na aba Eventos.
             </Text>
           </View>
-        ) : workspaceTab === "players" ? (
-          <>
-            <View style={styles.inlineHeader}>
-              <View style={styles.inlineHeaderContent}>
-                <Text style={styles.workspaceTitle}>Jogadores elegiveis</Text>
-                <Text style={styles.panelText}>
-                  Cadastre todos os jogadores da conta, com ou sem login no BoraJogar.
-                </Text>
-              </View>
-              <Pressable onPress={openCreatePlayerModal} style={styles.secondaryButton}>
-                <Text style={styles.secondaryButtonText}>Novo jogador</Text>
-              </Pressable>
-            </View>
-
-            {accountPlayers.length > 0 ? (
-              accountPlayers.map((item) => (
-                <View key={item.player.id} style={styles.listCard}>
-                  <View style={styles.listCardHeader}>
-                    <PlayerAvatar name={item.player.full_name} photoUrl={item.player.photo_url} />
-                    <View style={styles.flex}>
-                      <Text style={styles.panelTitle}>{item.player.full_name}</Text>
-                      <Text style={styles.panelText}>
-                        {item.player.email ?? "Sem email"} |{" "}
-                        {item.linkedProfile ? "Login vinculado" : "Sem login vinculado"}
-                      </Text>
-                      <Text style={styles.panelText}>
-                        Prioridade: {item.priorityGroup?.name ?? "Nao definida"}
-                      </Text>
-                      <Text style={styles.panelText}>
-                        Idade: {item.player.age !== null ? `${item.player.age} anos` : "Nao informada"} | Nota:{" "}
-                        {formatPlayerRating(item.player.rating)}
-                      </Text>
-                      <Text style={styles.panelText}>
-                        Posicoes:{" "}
-                        {item.preferredPositions.length > 0
-                          ? item.preferredPositions.map((position) => position.name).join(", ")
-                          : "Nao informadas"}
-                      </Text>
-                      <Text style={styles.panelText}>
-                        Lista semanal: {item.player.is_default_for_weekly_list ? "Entra por padrao" : "Fora da base"}
-                      </Text>
-                      {item.player.notes ? (
-                        <Text style={styles.panelText}>Observacao: {item.player.notes}</Text>
-                      ) : null}
-                    </View>
-                    <View style={styles.listActions}>
-                      <Pressable onPress={() => openEditPlayerModal(item)} style={styles.inlineActionButton}>
-                        <Text style={styles.inlineActionText}>Editar</Text>
-                      </Pressable>
-                      <Pressable
-                        onPress={() => confirmDeactivatePlayer(item)}
-                        disabled={deletingItemId === item.player.id}
-                        style={[styles.inlineDangerButton, deletingItemId === item.player.id && styles.buttonDisabled]}>
-                        <Text style={styles.inlineDangerText}>
-                          {deletingItemId === item.player.id ? "Removendo..." : "Remover"}
-                        </Text>
-                      </Pressable>
-                    </View>
-                  </View>
-                </View>
-              ))
-            ) : (
-              <Text style={styles.panelText}>
-                Nenhum jogador cadastrado ainda. Use esse cadastro mesmo quando a pessoa nao tiver login.
-              </Text>
-            )}
-          </>
         ) : (
           <>
             <View style={styles.inlineHeader}>
