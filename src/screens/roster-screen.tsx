@@ -41,12 +41,17 @@ import {
   type PreparedPlayerPhoto,
 } from "@/src/lib/player-photos";
 import { useAuth } from "@/src/providers/auth-provider";
-import type { AccountRole, ModalityPosition, SportsAccount } from "@/src/types/domain";
+import type { AccountRole, DominantSide, ModalityPosition, SportsAccount } from "@/src/types/domain";
 
 const roleLabels: Record<AccountRole, string> = {
   group_admin: "Admin do grupo",
   group_moderator: "Moderador do grupo",
   player: "Jogador",
+};
+
+const dominantSideLabels: Record<DominantSide, string> = {
+  right: "Destro",
+  left: "Canhoto",
 };
 
 type AccountAccessItem = {
@@ -118,6 +123,16 @@ function normalizeOptionalNotes(value: string) {
 
 function formatPlayerRating(value: number | null) {
   return value === null ? "Sem nota" : value.toFixed(2);
+}
+
+function formatDominantSide(value: DominantSide | null) {
+  return value ? dominantSideLabels[value] : "Nao informado";
+}
+
+function getDominantSideLabel(modalityName: string | null | undefined) {
+  const normalizedName = modalityName?.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase() ?? "";
+
+  return normalizedName.includes("futebol") ? "Pe dominante" : "Mao dominante";
 }
 
 function getPlayerInitials(name: string) {
@@ -195,6 +210,7 @@ export default function RosterScreen() {
   const [playerPreferredPositionIds, setPlayerPreferredPositionIds] = useState<string[]>([]);
   const [playerAgeDraft, setPlayerAgeDraft] = useState("");
   const [playerRatingDraft, setPlayerRatingDraft] = useState("");
+  const [playerDominantSideDraft, setPlayerDominantSideDraft] = useState<DominantSide | null>(null);
   const [playerNotesDraft, setPlayerNotesDraft] = useState("");
   const [playerWeeklyDefaultDraft, setPlayerWeeklyDefaultDraft] = useState(true);
 
@@ -349,6 +365,7 @@ export default function RosterScreen() {
     setPlayerPreferredPositionIds([]);
     setPlayerAgeDraft("");
     setPlayerRatingDraft("");
+    setPlayerDominantSideDraft(null);
     setPlayerNotesDraft("");
     setPlayerWeeklyDefaultDraft(true);
   }
@@ -370,6 +387,7 @@ export default function RosterScreen() {
     setPlayerPreferredPositionIds(item.preferredPositions.map((position) => position.id));
     setPlayerAgeDraft(item.player.age !== null ? String(item.player.age) : "");
     setPlayerRatingDraft(item.player.rating !== null ? item.player.rating.toFixed(2) : "");
+    setPlayerDominantSideDraft(item.player.dominant_side);
     setPlayerNotesDraft(item.player.notes ?? "");
     setPlayerWeeklyDefaultDraft(item.player.is_default_for_weekly_list);
   }
@@ -518,6 +536,7 @@ export default function RosterScreen() {
     linkedProfileId: string | null;
     playerAge: number | null;
     playerRating: number | null;
+    playerDominantSide: DominantSide | null;
     playerNotes: string | null;
     priorityGroupId: string | null;
     isDefaultForWeeklyList: boolean;
@@ -538,6 +557,7 @@ export default function RosterScreen() {
         photoUrl: uploadedPhotoUrl,
         age: input.playerAge,
         rating: input.playerRating,
+        dominantSide: input.playerDominantSide,
         notes: input.playerNotes,
         linkedProfileId: input.linkedProfileId,
         priorityGroupId: input.priorityGroupId,
@@ -577,6 +597,7 @@ export default function RosterScreen() {
         const normalizedEmail =
           profile.email?.trim().toLowerCase() ?? currentPlayer?.player.email?.trim().toLowerCase() ?? null;
         const playerRating = currentPlayer?.player.rating ?? null;
+        const playerDominantSide = playerDominantSideDraft;
         const priorityGroupId =
           currentPlayer?.player.priority_group_id ??
           selectedMembership?.priorityGroup?.id ??
@@ -594,6 +615,7 @@ export default function RosterScreen() {
             photoUrl: desiredPhotoUrl,
             age: playerAge,
             rating: playerRating,
+            dominantSide: playerDominantSide,
             notes: playerNotes,
             linkedProfileId: profile.id,
             priorityGroupId,
@@ -609,6 +631,7 @@ export default function RosterScreen() {
             photoUrl: desiredPhotoUrl,
             age: playerAge,
             rating: null,
+            dominantSide: playerDominantSide,
             notes: playerNotes,
             linkedProfileId: profile.id,
             priorityGroupId,
@@ -628,6 +651,7 @@ export default function RosterScreen() {
             linkedProfileId: profile.id,
             playerAge,
             playerRating,
+            playerDominantSide,
             playerNotes,
             priorityGroupId,
             isDefaultForWeeklyList,
@@ -661,6 +685,7 @@ export default function RosterScreen() {
 
       const normalizedPlayerEmail = playerEmailDraft.trim().toLowerCase() || null;
       const playerRating = parseOptionalPlayerRating(playerRatingDraft);
+      const playerDominantSide = playerDominantSideDraft;
       let linkedProfileId = await resolveLinkedProfileId(normalizedPlayerEmail ?? "");
       let invitedAccess = false;
       let manualActionLink: string | null = null;
@@ -689,6 +714,7 @@ export default function RosterScreen() {
           photoUrl: desiredPhotoUrl,
           age: playerAge,
           rating: playerRating,
+          dominantSide: playerDominantSide,
           notes: playerNotes,
           linkedProfileId,
           priorityGroupId: playerPriorityGroupDraftId,
@@ -704,6 +730,7 @@ export default function RosterScreen() {
           photoUrl: desiredPhotoUrl,
           age: playerAge,
           rating: playerRating,
+          dominantSide: playerDominantSide,
           notes: playerNotes,
           linkedProfileId,
           priorityGroupId: playerPriorityGroupDraftId,
@@ -723,6 +750,7 @@ export default function RosterScreen() {
           linkedProfileId,
           playerAge,
           playerRating,
+          playerDominantSide,
           playerNotes,
           priorityGroupId: playerPriorityGroupDraftId,
           isDefaultForWeeklyList: playerWeeklyDefaultDraft,
@@ -800,6 +828,7 @@ export default function RosterScreen() {
   const playersWithLoginCount = accountPlayers.filter((item) => Boolean(item.linkedProfile)).length;
   const defaultWeeklyCount = accountPlayers.filter((item) => item.player.is_default_for_weekly_list).length;
   const isSelfModal = playerModal?.mode === "self";
+  const dominantSideLabel = getDominantSideLabel(overview?.modality.name);
 
   function renderPlayerModal() {
     if (!playerModal || !selectedAccess) {
@@ -818,8 +847,8 @@ export default function RosterScreen() {
       <Modal transparent animationType="slide" visible onRequestClose={closePlayerModal}>
         <View style={styles.modalBackdrop}>
           <KeyboardAvoidingView
-            behavior={Platform.OS === "ios" ? "padding" : undefined}
-            keyboardVerticalOffset={Platform.OS === "ios" ? 24 : 0}
+            behavior={Platform.OS === "ios" ? "padding" : "height"}
+            keyboardVerticalOffset={Platform.OS === "ios" ? 0 : 18}
             style={styles.modalKeyboard}>
             <View style={styles.modalCard}>
               <View style={styles.modalHeader}>
@@ -837,9 +866,10 @@ export default function RosterScreen() {
               </View>
 
               <ScrollView
+                style={styles.modalScroll}
                 contentContainerStyle={styles.modalContent}
                 keyboardShouldPersistTaps="handled"
-                showsVerticalScrollIndicator={false}>
+                showsVerticalScrollIndicator={Platform.OS === "web"}>
                 <View style={styles.formSection}>
                   <Text style={styles.formSectionTitle}>Dados principais</Text>
 
@@ -926,6 +956,48 @@ export default function RosterScreen() {
                         </Text>
                       </View>
                     )}
+                  </View>
+
+                  <View style={styles.fieldBlock}>
+                    <Text style={styles.label}>{dominantSideLabel}</Text>
+                    <Text style={styles.fieldHint}>
+                      Use a lateralidade dominante do atleta nesta modalidade. Isso ajuda na montagem automatica dos times.
+                    </Text>
+                    <View style={styles.chips}>
+                      <Pressable
+                        onPress={() => setPlayerDominantSideDraft("right")}
+                        style={[styles.chip, playerDominantSideDraft === "right" && styles.chipSelected]}>
+                        <Text
+                          style={[
+                            styles.chipText,
+                            playerDominantSideDraft === "right" && styles.chipTextSelected,
+                          ]}>
+                          Destro
+                        </Text>
+                      </Pressable>
+                      <Pressable
+                        onPress={() => setPlayerDominantSideDraft("left")}
+                        style={[styles.chip, playerDominantSideDraft === "left" && styles.chipSelected]}>
+                        <Text
+                          style={[
+                            styles.chipText,
+                            playerDominantSideDraft === "left" && styles.chipTextSelected,
+                          ]}>
+                          Canhoto
+                        </Text>
+                      </Pressable>
+                      <Pressable
+                        onPress={() => setPlayerDominantSideDraft(null)}
+                        style={[styles.chip, playerDominantSideDraft === null && styles.chipSelected]}>
+                        <Text
+                          style={[
+                            styles.chipText,
+                            playerDominantSideDraft === null && styles.chipTextSelected,
+                          ]}>
+                          Nao informado
+                        </Text>
+                      </Pressable>
+                    </View>
                   </View>
 
                   <View style={styles.fieldBlock}>
@@ -1178,6 +1250,11 @@ export default function RosterScreen() {
                         </View>
                         <View style={styles.secondaryTag}>
                           <Text style={styles.secondaryTagText}>
+                            {dominantSideLabel}: {formatDominantSide(currentPlayer.player.dominant_side)}
+                          </Text>
+                        </View>
+                        <View style={styles.secondaryTag}>
+                          <Text style={styles.secondaryTagText}>
                             {currentPlayer.player.is_default_for_weekly_list
                               ? "Entra na base semanal"
                               : "Fora da base semanal"}
@@ -1251,6 +1328,11 @@ export default function RosterScreen() {
                         <View style={styles.secondaryTag}>
                           <Text style={styles.secondaryTagText}>
                             Nota: {formatPlayerRating(item.player.rating)}
+                          </Text>
+                        </View>
+                        <View style={styles.secondaryTag}>
+                          <Text style={styles.secondaryTagText}>
+                            {dominantSideLabel}: {formatDominantSide(item.player.dominant_side)}
                           </Text>
                         </View>
                         <View style={styles.secondaryTag}>
@@ -1581,9 +1663,14 @@ const styles = StyleSheet.create({
   },
   modalKeyboard: {
     width: "100%",
+    maxHeight: "100%",
+    flexShrink: 1,
+    justifyContent: "center",
   },
   modalCard: {
-    maxHeight: "92%",
+    maxHeight: "100%",
+    width: "100%",
+    alignSelf: "center",
     borderTopLeftRadius: 28,
     borderTopRightRadius: 28,
     backgroundColor: Colors.background,
@@ -1591,6 +1678,9 @@ const styles = StyleSheet.create({
     paddingTop: 20,
     paddingBottom: 28,
     gap: 16,
+    flexShrink: 1,
+    minHeight: 0,
+    overflow: "hidden",
   },
   modalHeader: {
     flexDirection: "row",
@@ -1623,6 +1713,11 @@ const styles = StyleSheet.create({
   modalContent: {
     gap: 16,
     paddingBottom: 12,
+  },
+  modalScroll: {
+    flexGrow: 0,
+    flexShrink: 1,
+    minHeight: 0,
   },
   formSection: {
     borderRadius: 24,

@@ -1,4 +1,5 @@
 export type AccountRole = "group_admin" | "group_moderator" | "player";
+export type DominantSide = "right" | "left";
 
 export type EventStatus = "draft" | "published" | "completed" | "cancelled";
 
@@ -103,6 +104,7 @@ export type AccountPlayer = {
   photo_url: string | null;
   age: number | null;
   rating: number | null;
+  dominant_side: DominantSide | null;
   notes: string | null;
   priority_group_id: string | null;
   is_default_for_weekly_list: boolean;

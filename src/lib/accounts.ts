@@ -6,6 +6,7 @@ import type {
   AccountMembership,
   AccountPriorityGroup,
   AccountSchedule,
+  DominantSide,
   Event,
   EventMatch,
   EventMatchTeam,
@@ -159,6 +160,7 @@ export type CreateAccountPlayerInput = {
   photoUrl: string | null;
   age: number | null;
   rating: number | null;
+  dominantSide?: DominantSide | null;
   notes: string | null;
   linkedProfileId: string | null;
   priorityGroupId: string | null;
@@ -174,6 +176,7 @@ export type UpdateAccountPlayerInput = {
   photoUrl: string | null;
   age: number | null;
   rating: number | null;
+  dominantSide?: DominantSide | null;
   notes: string | null;
   linkedProfileId: string | null;
   priorityGroupId: string | null;
@@ -188,6 +191,7 @@ export type UpsertAccountPlayerFromAccessInput = {
   photoUrl: string | null;
   age: number | null;
   rating: number | null;
+  dominantSide?: DominantSide | null;
   notes: string | null;
   linkedProfileId: string;
   priorityGroupId: string | null;
@@ -331,7 +335,7 @@ const eventMatchTeamPlayerSelectFields =
   "id, team_id, account_player_id, modality_position_id, sort_order, created_at";
 
 const accountPlayerSelectFields =
-  "id, account_id, linked_profile_id, full_name, email, photo_url, age, rating, notes, priority_group_id, is_default_for_weekly_list, is_active, created_by, created_at, updated_at";
+  "id, account_id, linked_profile_id, full_name, email, photo_url, age, rating, dominant_side, notes, priority_group_id, is_default_for_weekly_list, is_active, created_by, created_at, updated_at";
 
 function normalizeClockTime(value: string) {
   return value.length === 5 ? `${value}:00` : value;
@@ -2705,6 +2709,7 @@ export async function createAccountPlayer(input: CreateAccountPlayerInput) {
       photo_url: input.photoUrl,
       age: input.age,
       rating: input.rating,
+      dominant_side: input.dominantSide ?? null,
       notes: input.notes,
       priority_group_id: input.priorityGroupId,
       is_default_for_weekly_list: input.isDefaultForWeeklyList,
@@ -2750,6 +2755,8 @@ export async function updateAccountPlayer(input: UpdateAccountPlayerInput) {
       photo_url: input.photoUrl,
       age: input.age,
       rating: input.rating,
+      dominant_side:
+        input.dominantSide === undefined ? existingPlayer.dominant_side : input.dominantSide,
       notes: input.notes,
       priority_group_id: input.priorityGroupId,
       is_default_for_weekly_list: input.isDefaultForWeeklyList,
@@ -2805,6 +2812,7 @@ export async function upsertAccountPlayerFromAccess(
         photoUrl: input.photoUrl,
         age: input.age,
         rating: input.rating,
+        dominantSide: input.dominantSide,
         notes: input.notes,
         linkedProfileId: input.linkedProfileId,
         priorityGroupId: input.priorityGroupId,
@@ -2829,6 +2837,7 @@ export async function upsertAccountPlayerFromAccess(
     photoUrl: input.photoUrl,
     age: input.age,
     rating: input.rating,
+    dominantSide: input.dominantSide,
     notes: input.notes,
     linkedProfileId: input.linkedProfileId,
     priorityGroupId: input.priorityGroupId,
