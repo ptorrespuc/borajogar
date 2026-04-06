@@ -2940,96 +2940,98 @@ export default function EventsScreen() {
   return (
     <>
       <ScrollView style={styles.screen} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
-        <View style={styles.hero}>
-          <Text style={styles.heroKicker}>Eventos</Text>
-          <Text style={styles.heroTitle}>
-            {selectedAccess ? `Eventos - ${selectedAccess.account.name}` : "Eventos"}
-          </Text>
-          <Text style={styles.heroSubtitle}>
-            Veja a chamada atual, vote nas enquetes e acompanhe o historico do grupo.
-          </Text>
-        </View>
-
-        {availableAccounts.length > 1 ? (
-          <View style={styles.accountSwitcher}>
-            {availableAccounts.map((item) => {
-              const isSelected = item.account.id === selectedAccess?.account.id;
-              return (
-                <Pressable key={item.account.id} onPress={() => setSelectedAccountId(item.account.id)} style={[styles.accountChip, isSelected && styles.accountChipSelected]}>
-                  <Text style={[styles.accountChipText, isSelected && styles.accountChipTextSelected]}>{item.account.name}</Text>
-                </Pressable>
-              );
-            })}
-          </View>
-        ) : null}
-
-        {isWaitingForVisibleAccounts ? (
-          <View style={styles.panel}>
-            <ActivityIndicator color={Colors.tint} />
-            <Text style={styles.panelText}>Carregando contas esportivas...</Text>
-          </View>
-        ) : null}
-
-        {!selectedAccess && !isWaitingForVisibleAccounts ? (
-          <View style={styles.panel}>
-            <Text style={styles.panelTitle}>Nenhuma conta esportiva visivel</Text>
-            <Text style={styles.panelText}>Assim que houver uma conta vinculada, os eventos aparecerao aqui como timeline principal.</Text>
-          </View>
-        ) : null}
-
-        {isWaitingForSelectedAccountData ? (
-          <View style={styles.panel}>
-            <ActivityIndicator color={Colors.tint} />
-            <Text style={styles.panelText}>Carregando evento atual e historico da conta...</Text>
-          </View>
-        ) : null}
-
-        {isSelectedAccountDataUnavailable ? (
-          <View style={styles.panel}>
-            <Text style={styles.panelTitle}>Nao foi possivel abrir os eventos desta conta</Text>
-            <Text style={styles.panelText}>
-              Tente novamente para recarregar a timeline, o quorum e as enquetes do grupo.
+        <View style={styles.contentInner}>
+          <View style={styles.hero}>
+            <Text style={styles.heroKicker}>Eventos</Text>
+            <Text style={styles.heroTitle}>
+              {selectedAccess ? `Eventos - ${selectedAccess.account.name}` : "Eventos"}
             </Text>
-            <Pressable onPress={() => void reloadScreenData()} style={styles.secondaryButton}>
-              <Text style={styles.secondaryButtonText}>Tentar novamente</Text>
-            </Pressable>
+            <Text style={styles.heroSubtitle}>
+              Veja a chamada atual, vote nas enquetes e acompanhe o historico do grupo.
+            </Text>
           </View>
-        ) : null}
 
-        {selectedAccess && overview ? (
-          <>
-            {message ? (
-              <View style={[styles.feedbackBanner, message.tone === "error" ? styles.feedbackError : styles.feedbackSuccess]}>
-                <Text style={[styles.feedbackText, message.tone === "error" ? styles.feedbackErrorText : styles.feedbackSuccessText]}>{message.text}</Text>
-              </View>
-            ) : null}
+          {availableAccounts.length > 1 ? (
+            <View style={styles.accountSwitcher}>
+              {availableAccounts.map((item) => {
+                const isSelected = item.account.id === selectedAccess?.account.id;
+                return (
+                  <Pressable key={item.account.id} onPress={() => setSelectedAccountId(item.account.id)} style={[styles.accountChip, isSelected && styles.accountChipSelected]}>
+                    <Text style={[styles.accountChipText, isSelected && styles.accountChipTextSelected]}>{item.account.name}</Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+          ) : null}
 
-            {isLoading ? (
-              <View style={styles.panel}>
-                <ActivityIndicator color={Colors.tint} />
-                <Text style={styles.panelText}>Carregando eventos da conta...</Text>
-              </View>
-            ) : (
-              <>
-                {renderActiveEventWorkspace()}
-                <View style={styles.section}>
-                  <View style={styles.inlineHeader}>
-                    <View style={styles.inlineHeaderContent}>
-                      <Text style={styles.workspaceTitle}>Historico de eventos</Text>
-                      <Text style={styles.panelText}>Navegue pelos eventos mais recentes do grupo, do mais novo para o mais antigo.</Text>
-                    </View>
-                  </View>
+          {isWaitingForVisibleAccounts ? (
+            <View style={styles.panel}>
+              <ActivityIndicator color={Colors.tint} />
+              <Text style={styles.panelText}>Carregando contas esportivas...</Text>
+            </View>
+          ) : null}
 
-                  {historyItems.length > 0 ? historyItems.map((item) => renderHistoryItem(item)) : (
-                    <View style={styles.panel}>
-                      <Text style={styles.panelText}>Ainda nao ha eventos anteriores para consultar.</Text>
-                    </View>
-                  )}
+          {!selectedAccess && !isWaitingForVisibleAccounts ? (
+            <View style={styles.panel}>
+              <Text style={styles.panelTitle}>Nenhuma conta esportiva visivel</Text>
+              <Text style={styles.panelText}>Assim que houver uma conta vinculada, os eventos aparecerao aqui como timeline principal.</Text>
+            </View>
+          ) : null}
+
+          {isWaitingForSelectedAccountData ? (
+            <View style={styles.panel}>
+              <ActivityIndicator color={Colors.tint} />
+              <Text style={styles.panelText}>Carregando evento atual e historico da conta...</Text>
+            </View>
+          ) : null}
+
+          {isSelectedAccountDataUnavailable ? (
+            <View style={styles.panel}>
+              <Text style={styles.panelTitle}>Nao foi possivel abrir os eventos desta conta</Text>
+              <Text style={styles.panelText}>
+                Tente novamente para recarregar a timeline, o quorum e as enquetes do grupo.
+              </Text>
+              <Pressable onPress={() => void reloadScreenData()} style={styles.secondaryButton}>
+                <Text style={styles.secondaryButtonText}>Tentar novamente</Text>
+              </Pressable>
+            </View>
+          ) : null}
+
+          {selectedAccess && overview ? (
+            <>
+              {message ? (
+                <View style={[styles.feedbackBanner, message.tone === "error" ? styles.feedbackError : styles.feedbackSuccess]}>
+                  <Text style={[styles.feedbackText, message.tone === "error" ? styles.feedbackErrorText : styles.feedbackSuccessText]}>{message.text}</Text>
                 </View>
-              </>
-            )}
-          </>
-        ) : null}
+              ) : null}
+
+              {isLoading ? (
+                <View style={styles.panel}>
+                  <ActivityIndicator color={Colors.tint} />
+                  <Text style={styles.panelText}>Carregando eventos da conta...</Text>
+                </View>
+              ) : (
+                <>
+                  {renderActiveEventWorkspace()}
+                  <View style={styles.section}>
+                    <View style={styles.inlineHeader}>
+                      <View style={styles.inlineHeaderContent}>
+                        <Text style={styles.workspaceTitle}>Historico de eventos</Text>
+                        <Text style={styles.panelText}>Navegue pelos eventos mais recentes do grupo, do mais novo para o mais antigo.</Text>
+                      </View>
+                    </View>
+
+                    {historyItems.length > 0 ? historyItems.map((item) => renderHistoryItem(item)) : (
+                      <View style={styles.panel}>
+                        <Text style={styles.panelText}>Ainda nao ha eventos anteriores para consultar.</Text>
+                      </View>
+                    )}
+                  </View>
+                </>
+              )}
+            </>
+          ) : null}
+        </View>
       </ScrollView>
       {renderEventPollModal()}
       {renderMatchModal()}
@@ -3039,31 +3041,32 @@ export default function EventsScreen() {
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: "#f4f6ef" },
-  content: { padding: 24, gap: 20, paddingBottom: 48 },
-  hero: { backgroundColor: "#173f2b", borderRadius: 28, padding: 18, gap: 8, overflow: "hidden" },
+  content: { paddingHorizontal: 16, paddingTop: 16, paddingBottom: 28 },
+  contentInner: { width: "100%", maxWidth: 980, alignSelf: "center", gap: 16 },
+  hero: { backgroundColor: "#173f2b", borderRadius: 24, padding: 16, gap: 6, overflow: "hidden" },
   heroKicker: { color: "#d7ef57", fontSize: 13, fontWeight: "800", textTransform: "uppercase", letterSpacing: 1.4 },
-  heroTitle: { color: "#ffffff", fontSize: 26, lineHeight: 30, fontWeight: "900" },
-  heroSubtitle: { color: "#dce7dc", fontSize: 15, lineHeight: 22 },
-  accountSwitcher: { flexDirection: "row", flexWrap: "wrap", gap: 10 },
-  accountChip: { borderRadius: 999, backgroundColor: "#e4ecde", paddingHorizontal: 16, paddingVertical: 10 },
+  heroTitle: { color: "#ffffff", fontSize: 22, lineHeight: 28, fontWeight: "900" },
+  heroSubtitle: { color: "#dce7dc", fontSize: 14, lineHeight: 21 },
+  accountSwitcher: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  accountChip: { borderRadius: 999, backgroundColor: "#e4ecde", paddingHorizontal: 14, paddingVertical: 8 },
   accountChipSelected: { backgroundColor: Colors.tint },
   accountChipText: { color: Colors.tint, fontWeight: "700" },
   accountChipTextSelected: { color: "#ffffff" },
-  summaryPanel: { backgroundColor: "#ffffff", borderRadius: 24, padding: 18, gap: 10, borderWidth: 1, borderColor: "#d8e2d2" },
+  summaryPanel: { backgroundColor: "#ffffff", borderRadius: 20, padding: 16, gap: 8, borderWidth: 1, borderColor: "#d8e2d2" },
   summaryHeader: { flexDirection: "row", gap: 12, alignItems: "flex-start" },
   summaryKicker: { color: Colors.textMuted, fontSize: 12, fontWeight: "800", textTransform: "uppercase", letterSpacing: 1.1 },
   summaryTitle: { color: Colors.text, fontSize: 24, fontWeight: "800" },
   summaryTags: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   summaryTag: { borderRadius: 999, backgroundColor: "#edf4e7", paddingHorizontal: 12, paddingVertical: 8 },
   summaryTagText: { color: Colors.tint, fontSize: 13, fontWeight: "800" },
-  panel: { backgroundColor: "#ffffff", borderRadius: 28, padding: 20, gap: 12, borderWidth: 1, borderColor: "#d8e2d2" },
-  section: { gap: 16 },
-  sectionCard: { backgroundColor: "#ffffff", borderRadius: 24, padding: 18, gap: 14, borderWidth: 1, borderColor: "#d8e2d2" },
-  sectionStack: { gap: 12 },
-  accordionContent: { gap: 14 },
-  panelTitle: { color: Colors.text, fontSize: 24, fontWeight: "800" },
+  panel: { backgroundColor: "#ffffff", borderRadius: 22, padding: 16, gap: 10, borderWidth: 1, borderColor: "#d8e2d2" },
+  section: { gap: 12 },
+  sectionCard: { backgroundColor: "#ffffff", borderRadius: 20, padding: 16, gap: 12, borderWidth: 1, borderColor: "#d8e2d2" },
+  sectionStack: { gap: 10 },
+  accordionContent: { gap: 12 },
+  panelTitle: { color: Colors.text, fontSize: 20, fontWeight: "800" },
   workspaceTitle: { color: Colors.text, fontSize: 22, fontWeight: "800" },
-  panelText: { color: Colors.textMuted, fontSize: 16, lineHeight: 24 },
+  panelText: { color: Colors.textMuted, fontSize: 15, lineHeight: 22 },
   feedbackBanner: { borderRadius: 18, paddingHorizontal: 16, paddingVertical: 14, borderWidth: 1 },
   feedbackSuccess: { backgroundColor: "#edf7ee", borderColor: "#bad8c0" },
   feedbackError: { backgroundColor: "#fff1ef", borderColor: "#efc6bf" },
@@ -3084,8 +3087,8 @@ const styles = StyleSheet.create({
   inlineDangerButton: { backgroundColor: "#fbe7e2", borderRadius: 14, paddingHorizontal: 14, paddingVertical: 10 },
   inlineDangerText: { color: "#a24335", fontWeight: "800" },
   buttonDisabled: { opacity: 0.6 },
-  eventOverviewCard: { borderRadius: 20, backgroundColor: "#f8faf5", padding: 16, gap: 14, borderWidth: 1, borderColor: "#dfe7d8" },
-  eventCurrentTitle: { color: Colors.text, fontSize: 24, fontWeight: "800" },
+  eventOverviewCard: { borderRadius: 18, backgroundColor: "#f8faf5", padding: 14, gap: 12, borderWidth: 1, borderColor: "#dfe7d8" },
+  eventCurrentTitle: { color: Colors.text, fontSize: 22, fontWeight: "800" },
   metricRow: { flexDirection: "row", flexWrap: "wrap", gap: 10 },
   metricPill: { minWidth: 96, flexGrow: 1, borderRadius: 16, backgroundColor: "#ffffff", paddingHorizontal: 14, paddingVertical: 12, borderWidth: 1, borderColor: "#dfe7d8", gap: 4 },
   metricLabel: { color: Colors.textMuted, fontSize: 12, fontWeight: "700", textTransform: "uppercase" },
@@ -3100,7 +3103,7 @@ const styles = StyleSheet.create({
   stateStepLabelActive: { color: Colors.text },
   weeklyBoard: { gap: 16 },
   weeklyColumn: { gap: 14 },
-  listCard: { backgroundColor: "#f8faf5", borderRadius: 20, padding: 16, gap: 10, borderWidth: 1, borderColor: "#dfe7d8" },
+  listCard: { backgroundColor: "#f8faf5", borderRadius: 18, padding: 14, gap: 8, borderWidth: 1, borderColor: "#dfe7d8" },
   listCardHeader: { flexDirection: "row", alignItems: "center", gap: 12 },
   avatarImage: { backgroundColor: "#d9e4d2" },
   avatarFallback: { alignItems: "center", justifyContent: "center", backgroundColor: "#dbe8d8" },
@@ -3111,7 +3114,7 @@ const styles = StyleSheet.create({
   chipSelected: { backgroundColor: Colors.tint },
   chipText: { color: Colors.tint, fontSize: 14, fontWeight: "700" },
   chipTextSelected: { color: "#ffffff" },
-  innerCard: { backgroundColor: "#f8faf5", borderRadius: 20, padding: 16, gap: 12, borderWidth: 1, borderColor: "#dfe7d8" },
+  innerCard: { backgroundColor: "#f8faf5", borderRadius: 18, padding: 14, gap: 10, borderWidth: 1, borderColor: "#dfe7d8" },
   innerCardTitle: { color: Colors.text, fontSize: 18, fontWeight: "800" },
   innerCardMeta: { color: Colors.textMuted, fontSize: 14, lineHeight: 20 },
   innerCardText: { color: Colors.textMuted, fontSize: 15, lineHeight: 22 },
@@ -3131,7 +3134,7 @@ const styles = StyleSheet.create({
   selectionCardTitle: { color: Colors.text, fontSize: 16, fontWeight: "800" },
   selectionCardText: { color: Colors.textMuted, fontSize: 14 },
   matchPlayerRow: { flexDirection: "row", alignItems: "center", gap: 8 },
-  eventCard: { backgroundColor: "#ffffff", borderRadius: 26, padding: 18, gap: 14, borderWidth: 1, borderColor: "#d8e2d2" },
+  eventCard: { backgroundColor: "#ffffff", borderRadius: 22, padding: 16, gap: 12, borderWidth: 1, borderColor: "#d8e2d2" },
   eventHeader: { flexDirection: "row", alignItems: "flex-start", gap: 12 },
   eventTitle: { color: Colors.text, fontSize: 24, fontWeight: "800" },
   eventMeta: { color: Colors.textMuted, fontSize: 14, lineHeight: 22 },

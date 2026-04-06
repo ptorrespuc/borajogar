@@ -5039,160 +5039,161 @@ export default function HomeScreen() {
         contentContainerStyle={styles.content}
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}>
-        <View style={styles.hero}>
-        <Text style={styles.kicker}>Conta conectada</Text>
-        <Text style={styles.heroTitle}>{profile?.full_name || "Usuario autenticado"}</Text>
-        <Text style={styles.heroSubtitle}>
-          {profile?.is_super_admin
-            ? "Perfil global habilitado para criar e administrar contas esportivas."
-            : "Perfil autenticado para acessar a conta esportiva vinculada."}
-        </Text>
-        <View style={styles.heroRow}>
-          <View style={styles.heroStat}>
-            <Text style={styles.heroStatValue}>{availableAccounts.length}</Text>
-            <Text style={styles.heroStatLabel}>
-              {profile?.is_super_admin ? "Contas visiveis" : "Contas vinculadas"}
+        <View style={styles.contentInner}>
+          <View style={styles.hero}>
+            <Text style={styles.kicker}>Conta conectada</Text>
+            <Text style={styles.heroTitle}>{profile?.full_name || "Usuario autenticado"}</Text>
+            <Text style={styles.heroSubtitle}>
+              {profile?.is_super_admin
+                ? "Perfil global habilitado para criar e administrar contas esportivas."
+                : "Perfil autenticado para acessar a conta esportiva vinculada."}
             </Text>
+            <View style={styles.heroRow}>
+              <View style={styles.heroStat}>
+                <Text style={styles.heroStatValue}>{availableAccounts.length}</Text>
+                <Text style={styles.heroStatLabel}>
+                  {profile?.is_super_admin ? "Contas visiveis" : "Contas vinculadas"}
+                </Text>
+              </View>
+              <View style={styles.heroStat}>
+                <Text style={styles.heroStatValue}>{profile?.email ?? "Sem email"}</Text>
+                <Text style={styles.heroStatLabel}>Email atual</Text>
+              </View>
+            </View>
           </View>
-          <View style={styles.heroStat}>
-            <Text style={styles.heroStatValue}>{profile?.email ?? "Sem email"}</Text>
-            <Text style={styles.heroStatLabel}>Email atual</Text>
-          </View>
-        </View>
-      </View>
-
-      <View style={styles.sectionHeader}>
-        <Text style={styles.sectionTitle}>
-          {isSuperAdmin ? "Gestao do super admin" : "Vinculos do usuario"}
-        </Text>
-        <Pressable onPress={() => void signOut()} style={styles.secondaryButton}>
-          <Text style={styles.secondaryButtonText}>Sair</Text>
-        </Pressable>
-      </View>
-
-      {isSuperAdmin ? renderSuperAdminManagement() : availableAccounts.length > 0 ? (
-        availableAccounts.map((item) => (
-          <Pressable
-            key={item.account.id}
-            onPress={() => setSelectedAccountId(item.account.id)}
-            style={[
-              styles.panel,
-              selectedAccountId === item.account.id && styles.panelSelected,
-            ]}>
-            <Text style={styles.panelTitle}>{item.account.name}</Text>
-            <Text style={styles.panelText}>{item.roleLabel}</Text>
-            <Text style={styles.panelText}>
-              Grupo prioritario: {item.priorityGroupName ?? "Nao definido"}
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionTitle}>
+              {isSuperAdmin ? "Gestao do super admin" : "Vinculos do usuario"}
             </Text>
-          </Pressable>
-        ))
-      ) : (
-        <View style={styles.panel}>
-          <Text style={styles.panelTitle}>
-            {profile?.is_super_admin
-              ? "Nenhuma conta esportiva cadastrada ainda"
-              : "Nenhuma conta vinculada ainda"}
-          </Text>
-          <Text style={styles.panelText}>
-            {profile?.is_super_admin
-              ? "Use a aba de contas esportivas para cadastrar a primeira conta."
-              : "Depois do cadastro da conta, vincule este usuario em account_memberships."}
-          </Text>
-        </View>
-      )}
+            <Pressable onPress={() => void signOut()} style={styles.secondaryButton}>
+              <Text style={styles.secondaryButtonText}>Sair</Text>
+            </Pressable>
+          </View>
 
-      {selectedAccess ? (
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>{isSuperAdmin ? "Conta selecionada" : "Conta ativa"}</Text>
-
-          {isOverviewLoading && !overview ? (
+          {isSuperAdmin ? renderSuperAdminManagement() : availableAccounts.length > 0 ? (
+            availableAccounts.map((item) => (
+              <Pressable
+                key={item.account.id}
+                onPress={() => setSelectedAccountId(item.account.id)}
+                style={[
+                  styles.panel,
+                  selectedAccountId === item.account.id && styles.panelSelected,
+                ]}>
+                <Text style={styles.panelTitle}>{item.account.name}</Text>
+                <Text style={styles.panelText}>{item.roleLabel}</Text>
+                <Text style={styles.panelText}>
+                  Grupo prioritario: {item.priorityGroupName ?? "Nao definido"}
+                </Text>
+              </Pressable>
+            ))
+          ) : (
             <View style={styles.panel}>
-              <ActivityIndicator color={Colors.tint} />
-              <Text style={styles.panelText}>Carregando configuracao da conta...</Text>
+              <Text style={styles.panelTitle}>
+                {profile?.is_super_admin
+                  ? "Nenhuma conta esportiva cadastrada ainda"
+                  : "Nenhuma conta vinculada ainda"}
+              </Text>
+              <Text style={styles.panelText}>
+                {profile?.is_super_admin
+                  ? "Use a aba de contas esportivas para cadastrar a primeira conta."
+                  : "Depois do cadastro da conta, vincule este usuario em account_memberships."}
+              </Text>
+            </View>
+          )}
+
+          {selectedAccess ? (
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>{isSuperAdmin ? "Conta selecionada" : "Conta ativa"}</Text>
+
+              {isOverviewLoading && !overview ? (
+                <View style={styles.panel}>
+                  <ActivityIndicator color={Colors.tint} />
+                  <Text style={styles.panelText}>Carregando configuracao da conta...</Text>
+                </View>
+              ) : null}
+
+              {overview ? (
+                <>
+                  {!isSuperAdmin ? renderAccountWorkspace() : null}
+
+                  <View style={styles.panel}>
+                    <Text style={styles.panelTitle}>{selectedAccess.account.name}</Text>
+                    <Text style={styles.panelText}>
+                      {isSuperAdmin ? "Conta esportiva selecionada para gestao." : `Seu papel nesta conta: ${selectedAccess.roleLabel}.`}
+                    </Text>
+                    <Text style={styles.panelText}>Modalidade principal: {overview.modality.name}</Text>
+                  </View>
+
+                  <View style={styles.summaryRow}>
+                    <View style={styles.summaryCard}>
+                      <Text style={styles.summaryValue}>{selectedAccess.account.name}</Text>
+                      <Text style={styles.summaryLabel}>Grupo esportivo</Text>
+                    </View>
+                    <View style={styles.summaryCard}>
+                      <Text style={styles.summaryValue}>{overview.modality.name}</Text>
+                      <Text style={styles.summaryLabel}>Modalidade</Text>
+                    </View>
+                    <View style={styles.summaryCard}>
+                      <Text style={styles.summaryValue}>{overview.activePlayerCount}</Text>
+                      <Text style={styles.summaryLabel}>Jogadores cadastrados</Text>
+                    </View>
+                    <View style={styles.summaryCard}>
+                      <Text style={styles.summaryValue}>{overview.activeMemberCount}</Text>
+                      <Text style={styles.summaryLabel}>Acessos com login</Text>
+                    </View>
+                    <View style={styles.summaryCard}>
+                      <Text style={styles.summaryValue}>{overview.activePollTemplateCount}</Text>
+                      <Text style={styles.summaryLabel}>Enquetes da conta</Text>
+                    </View>
+                  </View>
+
+                  <View style={styles.panel}>
+                    <Text style={styles.panelTitle}>Horario semanal</Text>
+                    {overview.schedules.map((schedule) => (
+                      <Text key={schedule.id} style={styles.panelText}>
+                        {formatSchedule(schedule.weekday, schedule.starts_at, schedule.ends_at)}
+                      </Text>
+                    ))}
+                  </View>
+
+                  <View style={styles.panel}>
+                    <Text style={styles.panelTitle}>Grupos prioritarios</Text>
+                    <Text style={styles.panelText}>
+                      Cada conta esportiva define seus proprios grupos. Eles nao sao compartilhados entre contas diferentes.
+                    </Text>
+                    <View style={styles.chips}>
+                      {overview.priorityGroups.map((group) => (
+                        <View key={group.id} style={styles.tag}>
+                          <Text style={styles.tagText}>
+                            {group.priority_rank}. {group.name}
+                          </Text>
+                        </View>
+                      ))}
+                    </View>
+                  </View>
+
+                  {isSuperAdmin ? renderAccountWorkspace() : null}
+                </>
+              ) : null}
             </View>
           ) : null}
 
-          {overview ? (
-            <>
-              {!isSuperAdmin ? renderAccountWorkspace() : null}
-
-              <View style={styles.panel}>
-                <Text style={styles.panelTitle}>{selectedAccess.account.name}</Text>
-                <Text style={styles.panelText}>
-                  {isSuperAdmin ? "Conta esportiva selecionada para gestao." : `Seu papel nesta conta: ${selectedAccess.roleLabel}.`}
-                </Text>
-                <Text style={styles.panelText}>Modalidade principal: {overview.modality.name}</Text>
-              </View>
-
-              <View style={styles.summaryRow}>
-                <View style={styles.summaryCard}>
-                  <Text style={styles.summaryValue}>{selectedAccess.account.name}</Text>
-                  <Text style={styles.summaryLabel}>Grupo esportivo</Text>
-                </View>
-                <View style={styles.summaryCard}>
-                  <Text style={styles.summaryValue}>{overview.modality.name}</Text>
-                  <Text style={styles.summaryLabel}>Modalidade</Text>
-                </View>
-                <View style={styles.summaryCard}>
-                  <Text style={styles.summaryValue}>{overview.activePlayerCount}</Text>
-                  <Text style={styles.summaryLabel}>Jogadores cadastrados</Text>
-                </View>
-                <View style={styles.summaryCard}>
-                  <Text style={styles.summaryValue}>{overview.activeMemberCount}</Text>
-                  <Text style={styles.summaryLabel}>Acessos com login</Text>
-                </View>
-                <View style={styles.summaryCard}>
-                  <Text style={styles.summaryValue}>{overview.activePollTemplateCount}</Text>
-                  <Text style={styles.summaryLabel}>Enquetes da conta</Text>
-                </View>
-              </View>
-
-              <View style={styles.panel}>
-                <Text style={styles.panelTitle}>Horario semanal</Text>
-                {overview.schedules.map((schedule) => (
-                  <Text key={schedule.id} style={styles.panelText}>
-                    {formatSchedule(schedule.weekday, schedule.starts_at, schedule.ends_at)}
-                  </Text>
-                ))}
-              </View>
-
-              <View style={styles.panel}>
-                <Text style={styles.panelTitle}>Grupos prioritarios</Text>
-                <Text style={styles.panelText}>
-                  Cada conta esportiva define seus proprios grupos. Eles nao sao compartilhados entre contas diferentes.
-                </Text>
-                <View style={styles.chips}>
-                  {overview.priorityGroups.map((group) => (
-                    <View key={group.id} style={styles.tag}>
-                      <Text style={styles.tagText}>
-                        {group.priority_rank}. {group.name}
-                      </Text>
-                    </View>
-                  ))}
-                </View>
-              </View>
-
-              {isSuperAdmin ? renderAccountWorkspace() : null}
-            </>
+          {error || overviewError || message ? (
+            <View
+              style={[
+                styles.messageCard,
+                message?.tone === "success" ? styles.messageSuccess : styles.messageError,
+              ]}>
+              <Text
+                style={[
+                  styles.messageText,
+                  message?.tone === "success" ? styles.messageTextSuccess : styles.messageTextError,
+                ]}>
+                {message?.text ?? error ?? overviewError}
+              </Text>
+            </View>
           ) : null}
         </View>
-      ) : null}
-
-        {error || overviewError || message ? (
-          <View
-            style={[
-              styles.messageCard,
-              message?.tone === "success" ? styles.messageSuccess : styles.messageError,
-            ]}>
-            <Text
-              style={[
-                styles.messageText,
-                message?.tone === "success" ? styles.messageTextSuccess : styles.messageTextError,
-              ]}>
-              {message?.text ?? error ?? overviewError}
-            </Text>
-          </View>
-        ) : null}
       </ScrollView>
       {renderAdminModal()}
       {renderEventPollModal()}
@@ -5203,12 +5204,13 @@ export default function HomeScreen() {
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: Colors.background },
-  content: { padding: 20, paddingBottom: 32, gap: 16 },
+  content: { paddingHorizontal: 16, paddingTop: 16, paddingBottom: 28 },
+  contentInner: { width: "100%", maxWidth: 980, alignSelf: "center", gap: 16 },
   hero: {
-    borderRadius: 28,
+    borderRadius: 24,
     backgroundColor: Colors.surfaceStrong,
-    padding: 24,
-    gap: 12,
+    padding: 18,
+    gap: 10,
   },
   kicker: {
     color: Colors.accent,
@@ -5217,19 +5219,19 @@ const styles = StyleSheet.create({
     textTransform: "uppercase",
     letterSpacing: 1.2,
   },
-  heroTitle: { color: "#f8fbf5", fontSize: 28, fontWeight: "900", lineHeight: 34 },
-  heroSubtitle: { color: "#d7e5da", fontSize: 15, lineHeight: 22 },
-  heroRow: { flexDirection: "row", gap: 12 },
+  heroTitle: { color: "#f8fbf5", fontSize: 24, fontWeight: "900", lineHeight: 30 },
+  heroSubtitle: { color: "#d7e5da", fontSize: 14, lineHeight: 21 },
+  heroRow: { flexDirection: "row", gap: 10 },
   heroStat: {
     flex: 1,
-    borderRadius: 18,
+    borderRadius: 16,
     backgroundColor: "rgba(255,255,255,0.08)",
-    padding: 14,
+    padding: 12,
     gap: 4,
   },
   heroStatValue: { color: "#ffffff", fontSize: 16, fontWeight: "800" },
   heroStatLabel: { color: "#c6d4c9", fontSize: 12, fontWeight: "700" },
-  section: { gap: 12 },
+  section: { gap: 10 },
   sectionHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
   sectionTitle: { color: Colors.text, fontSize: 18, fontWeight: "800" },
   tabRow: {
@@ -5257,12 +5259,12 @@ const styles = StyleSheet.create({
     color: Colors.text,
   },
   panel: {
-    borderRadius: 24,
+    borderRadius: 20,
     backgroundColor: Colors.surface,
     borderWidth: 1,
     borderColor: Colors.border,
-    padding: 18,
-    gap: 10,
+    padding: 16,
+    gap: 8,
   },
   panelSelected: { borderColor: Colors.tint, backgroundColor: "#f3f9ef" },
   panelTitle: { color: Colors.text, fontSize: 16, fontWeight: "800" },
@@ -5285,12 +5287,12 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   listCard: {
-    borderRadius: 18,
+    borderRadius: 16,
     borderWidth: 1,
     borderColor: Colors.border,
     backgroundColor: Colors.background,
-    padding: 14,
-    gap: 10,
+    padding: 12,
+    gap: 8,
   },
   listCardSelected: {
     borderColor: Colors.tint,
@@ -5518,11 +5520,11 @@ const styles = StyleSheet.create({
   summaryCard: {
     minWidth: "30%",
     flexGrow: 1,
-    borderRadius: 20,
+    borderRadius: 18,
     backgroundColor: Colors.surface,
     borderWidth: 1,
     borderColor: Colors.border,
-    padding: 16,
+    padding: 14,
     gap: 6,
   },
   summaryValue: { color: Colors.text, fontSize: 20, fontWeight: "900" },

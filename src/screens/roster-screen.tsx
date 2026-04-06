@@ -1070,258 +1070,260 @@ export default function RosterScreen() {
         contentContainerStyle={styles.content}
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}>
-        <View style={styles.header}>
-          <Text style={styles.title}>Elenco</Text>
-          <Text style={styles.subtitle}>
-            Cadastre os jogadores da conta, mantenha o perfil esportivo atualizado e consulte quem esta apto a entrar nos eventos.
-          </Text>
-        </View>
-
-        {availableAccounts.length > 1 ? (
-          <View style={styles.accountSwitcher}>
-            {availableAccounts.map((item) => {
-              const isSelected = item.account.id === selectedAccess?.account.id;
-
-              return (
-                <Pressable
-                  key={item.account.id}
-                  onPress={() => setSelectedAccountId(item.account.id)}
-                  style={[styles.accountChip, isSelected && styles.accountChipSelected]}>
-                  <Text style={[styles.accountChipText, isSelected && styles.accountChipTextSelected]}>
-                    {item.account.name}
-                  </Text>
-                </Pressable>
-              );
-            })}
-          </View>
-        ) : null}
-
-        {!selectedAccess ? (
-          <View style={styles.panel}>
-            <Text style={styles.panelTitle}>Nenhuma conta esportiva disponivel</Text>
-            <Text style={styles.panelText}>
-              Associe este usuario a uma conta ou cadastre a primeira conta no BoraJogar.
+        <View style={styles.contentInner}>
+          <View style={styles.header}>
+            <Text style={styles.title}>Elenco</Text>
+            <Text style={styles.subtitle}>
+              Cadastre os jogadores da conta, mantenha o perfil esportivo atualizado e consulte quem esta apto a entrar nos eventos.
             </Text>
           </View>
-        ) : (
-          <>
+
+          {availableAccounts.length > 1 ? (
+            <View style={styles.accountSwitcher}>
+              {availableAccounts.map((item) => {
+                const isSelected = item.account.id === selectedAccess?.account.id;
+
+                return (
+                  <Pressable
+                    key={item.account.id}
+                    onPress={() => setSelectedAccountId(item.account.id)}
+                    style={[styles.accountChip, isSelected && styles.accountChipSelected]}>
+                    <Text style={[styles.accountChipText, isSelected && styles.accountChipTextSelected]}>
+                      {item.account.name}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+          ) : null}
+
+          {!selectedAccess ? (
             <View style={styles.panel}>
-              <Text style={styles.panelTitle}>{selectedAccess.account.name}</Text>
-              <Text style={styles.panelText}>Modalidade: {overview?.modality.name ?? "Carregando..."}</Text>
-              <Text style={styles.panelText}>Seu papel: {selectedAccess.roleLabel}</Text>
+              <Text style={styles.panelTitle}>Nenhuma conta esportiva disponivel</Text>
               <Text style={styles.panelText}>
-                Grupo prioritario: {selectedAccess.priorityGroupName ?? "Nao definido"}
+                Associe este usuario a uma conta ou cadastre a primeira conta no BoraJogar.
               </Text>
             </View>
-
-            <View style={styles.summaryRow}>
-              <View style={styles.summaryCard}>
-                <Text style={styles.summaryValue}>{accountPlayers.length}</Text>
-                <Text style={styles.summaryLabel}>Jogadores cadastrados</Text>
-              </View>
-              <View style={styles.summaryCard}>
-                <Text style={styles.summaryValue}>{playersWithLoginCount}</Text>
-                <Text style={styles.summaryLabel}>Com login</Text>
-              </View>
-              <View style={styles.summaryCard}>
-                <Text style={styles.summaryValue}>{defaultWeeklyCount}</Text>
-                <Text style={styles.summaryLabel}>Base semanal</Text>
-              </View>
-            </View>
-
-            {selectedMembership || currentPlayer ? (
+          ) : (
+            <>
               <View style={styles.panel}>
+                <Text style={styles.panelTitle}>{selectedAccess.account.name}</Text>
+                <Text style={styles.panelText}>Modalidade: {overview?.modality.name ?? "Carregando..."}</Text>
+                <Text style={styles.panelText}>Seu papel: {selectedAccess.roleLabel}</Text>
+                <Text style={styles.panelText}>
+                  Grupo prioritario: {selectedAccess.priorityGroupName ?? "Nao definido"}
+                </Text>
+              </View>
+
+              <View style={styles.summaryRow}>
+                <View style={styles.summaryCard}>
+                  <Text style={styles.summaryValue}>{accountPlayers.length}</Text>
+                  <Text style={styles.summaryLabel}>Jogadores cadastrados</Text>
+                </View>
+                <View style={styles.summaryCard}>
+                  <Text style={styles.summaryValue}>{playersWithLoginCount}</Text>
+                  <Text style={styles.summaryLabel}>Com login</Text>
+                </View>
+                <View style={styles.summaryCard}>
+                  <Text style={styles.summaryValue}>{defaultWeeklyCount}</Text>
+                  <Text style={styles.summaryLabel}>Base semanal</Text>
+                </View>
+              </View>
+
+              {selectedMembership || currentPlayer ? (
+                <View style={styles.panel}>
+                  <View style={styles.inlineHeader}>
+                    <View style={styles.inlineHeaderContent}>
+                      <Text style={styles.sectionTitle}>Meu cadastro esportivo</Text>
+                      <Text style={styles.panelText}>
+                        Edite aqui suas informacoes esportivas. O grupo prioritario continua somente leitura.
+                      </Text>
+                    </View>
+                    <Pressable onPress={openSelfPlayerModal} style={styles.secondaryButton}>
+                      <Text style={styles.secondaryButtonText}>
+                        {currentPlayer ? "Editar meu cadastro" : "Criar meu cadastro"}
+                      </Text>
+                    </Pressable>
+                  </View>
+
+                  {currentPlayer ? (
+                    <View style={styles.playerCard}>
+                      <View style={styles.playerCardHeader}>
+                        <PlayerAvatar
+                          name={currentPlayer.player.full_name}
+                          photoUrl={currentPlayer.player.photo_url}
+                          size={56}
+                        />
+                        <View style={styles.flex}>
+                          <Text style={styles.playerName}>{currentPlayer.player.full_name}</Text>
+                          <Text style={styles.playerMeta}>
+                            {profile?.email ?? currentPlayer.player.email ?? "Sem email"}
+                          </Text>
+                          <Text style={styles.playerMeta}>
+                            Grupo: {currentPlayer.priorityGroup?.name ?? selectedMembership?.priorityGroup?.name ?? "Nao definido"}
+                          </Text>
+                        </View>
+                      </View>
+
+                      <View style={styles.inlineWrap}>
+                        <View style={styles.secondaryTag}>
+                          <Text style={styles.secondaryTagText}>
+                            Idade: {currentPlayer.player.age !== null ? `${currentPlayer.player.age} anos` : "Nao informada"}
+                          </Text>
+                        </View>
+                        <View style={styles.secondaryTag}>
+                          <Text style={styles.secondaryTagText}>
+                            Nota: {formatPlayerRating(currentPlayer.player.rating)}
+                          </Text>
+                        </View>
+                        <View style={styles.secondaryTag}>
+                          <Text style={styles.secondaryTagText}>
+                            {currentPlayer.player.is_default_for_weekly_list
+                              ? "Entra na base semanal"
+                              : "Fora da base semanal"}
+                          </Text>
+                        </View>
+                      </View>
+
+                      <Text style={styles.playerMeta}>
+                        Posicoes:{" "}
+                        {currentPlayer.preferredPositions.length > 0
+                          ? currentPlayer.preferredPositions.map((position) => position.name).join(", ")
+                          : "Nao informadas"}
+                      </Text>
+                      {currentPlayer.player.notes ? (
+                        <Text style={styles.playerMeta}>Observacao: {currentPlayer.player.notes}</Text>
+                      ) : null}
+                    </View>
+                  ) : (
+                    <Text style={styles.panelText}>
+                      Seu cadastro esportivo ainda nao foi criado nesta conta. Use o botao acima para criar.
+                    </Text>
+                  )}
+                </View>
+              ) : null}
+
+              <View style={styles.section}>
                 <View style={styles.inlineHeader}>
                   <View style={styles.inlineHeaderContent}>
-                    <Text style={styles.sectionTitle}>Meu cadastro esportivo</Text>
+                    <Text style={styles.sectionTitle}>Jogadores da conta</Text>
                     <Text style={styles.panelText}>
-                      Edite aqui suas informacoes esportivas. O grupo prioritario continua somente leitura.
+                      {canManagePlayers
+                        ? "Gerencie aqui todos os jogadores da conta, com ou sem login no BoraJogar."
+                        : "Consulte aqui o elenco esportivo vinculado a esta conta."}
                     </Text>
                   </View>
-                  <Pressable onPress={openSelfPlayerModal} style={styles.secondaryButton}>
-                    <Text style={styles.secondaryButtonText}>
-                      {currentPlayer ? "Editar meu cadastro" : "Criar meu cadastro"}
-                    </Text>
-                  </Pressable>
+                  {canManagePlayers ? (
+                    <Pressable onPress={openCreatePlayerModal} style={styles.secondaryButton}>
+                      <Text style={styles.secondaryButtonText}>Novo jogador</Text>
+                    </Pressable>
+                  ) : null}
                 </View>
 
-                {currentPlayer ? (
-                  <View style={styles.playerCard}>
-                    <View style={styles.playerCardHeader}>
-                      <PlayerAvatar
-                        name={currentPlayer.player.full_name}
-                        photoUrl={currentPlayer.player.photo_url}
-                        size={56}
-                      />
-                      <View style={styles.flex}>
-                        <Text style={styles.playerName}>{currentPlayer.player.full_name}</Text>
-                        <Text style={styles.playerMeta}>
-                          {profile?.email ?? currentPlayer.player.email ?? "Sem email"}
-                        </Text>
-                        <Text style={styles.playerMeta}>
-                          Grupo: {currentPlayer.priorityGroup?.name ?? selectedMembership?.priorityGroup?.name ?? "Nao definido"}
-                        </Text>
-                      </View>
-                    </View>
-
-                    <View style={styles.inlineWrap}>
-                      <View style={styles.secondaryTag}>
-                        <Text style={styles.secondaryTagText}>
-                          Idade: {currentPlayer.player.age !== null ? `${currentPlayer.player.age} anos` : "Nao informada"}
-                        </Text>
-                      </View>
-                      <View style={styles.secondaryTag}>
-                        <Text style={styles.secondaryTagText}>
-                          Nota: {formatPlayerRating(currentPlayer.player.rating)}
-                        </Text>
-                      </View>
-                      <View style={styles.secondaryTag}>
-                        <Text style={styles.secondaryTagText}>
-                          {currentPlayer.player.is_default_for_weekly_list
-                            ? "Entra na base semanal"
-                            : "Fora da base semanal"}
-                        </Text>
-                      </View>
-                    </View>
-
-                    <Text style={styles.playerMeta}>
-                      Posicoes:{" "}
-                      {currentPlayer.preferredPositions.length > 0
-                        ? currentPlayer.preferredPositions.map((position) => position.name).join(", ")
-                        : "Nao informadas"}
-                    </Text>
-                    {currentPlayer.player.notes ? (
-                      <Text style={styles.playerMeta}>Observacao: {currentPlayer.player.notes}</Text>
-                    ) : null}
+                {isLoading && accountPlayers.length === 0 ? (
+                  <View style={styles.loadingCard}>
+                    <ActivityIndicator color={Colors.tint} />
+                    <Text style={styles.loadingText}>Carregando elenco da conta...</Text>
                   </View>
+                ) : accountPlayers.length > 0 ? (
+                  accountPlayers.map((item) => (
+                    <View key={item.player.id} style={styles.playerCard}>
+                      <View style={styles.playerCardHeader}>
+                        <PlayerAvatar name={item.player.full_name} photoUrl={item.player.photo_url} />
+                        <View style={styles.flex}>
+                          <Text style={styles.playerName}>{item.player.full_name}</Text>
+                          <Text style={styles.playerMeta}>
+                            {item.player.email ?? "Sem email"} |{" "}
+                            {item.linkedProfile ? "Login vinculado" : "Sem login vinculado"}
+                          </Text>
+                          <Text style={styles.playerMeta}>
+                            Prioridade: {item.priorityGroup?.name ?? "Nao definida"}
+                          </Text>
+                        </View>
+                      </View>
+
+                      <View style={styles.inlineWrap}>
+                        <View style={styles.secondaryTag}>
+                          <Text style={styles.secondaryTagText}>
+                            Idade: {item.player.age !== null ? `${item.player.age} anos` : "Nao informada"}
+                          </Text>
+                        </View>
+                        <View style={styles.secondaryTag}>
+                          <Text style={styles.secondaryTagText}>
+                            Nota: {formatPlayerRating(item.player.rating)}
+                          </Text>
+                        </View>
+                        <View style={styles.secondaryTag}>
+                          <Text style={styles.secondaryTagText}>
+                            {item.player.is_default_for_weekly_list
+                              ? "Entra na base semanal"
+                              : "Fora da base semanal"}
+                          </Text>
+                        </View>
+                      </View>
+
+                      <Text style={styles.playerMeta}>
+                        Posicoes:{" "}
+                        {item.preferredPositions.length > 0
+                          ? item.preferredPositions.map((position) => position.name).join(", ")
+                          : "Nao informadas"}
+                      </Text>
+                      {item.player.notes ? (
+                        <Text style={styles.playerMeta}>Observacao: {item.player.notes}</Text>
+                      ) : null}
+
+                      {canManagePlayers ? (
+                        <View style={styles.listActions}>
+                          <Pressable
+                            onPress={() => openEditPlayerModal(item)}
+                            style={styles.inlineActionButton}>
+                            <Text style={styles.inlineActionText}>Editar</Text>
+                          </Pressable>
+                          <Pressable
+                            onPress={() => confirmDeactivatePlayer(item)}
+                            disabled={deletingPlayerId === item.player.id}
+                            style={[
+                              styles.inlineDangerButton,
+                              deletingPlayerId === item.player.id && styles.buttonDisabled,
+                            ]}>
+                            <Text style={styles.inlineDangerText}>
+                              {deletingPlayerId === item.player.id ? "Removendo..." : "Remover"}
+                            </Text>
+                          </Pressable>
+                        </View>
+                      ) : null}
+                    </View>
+                  ))
                 ) : (
-                  <Text style={styles.panelText}>
-                    Seu cadastro esportivo ainda nao foi criado nesta conta. Use o botao acima para criar.
-                  </Text>
+                  <View style={styles.panel}>
+                    <Text style={styles.panelTitle}>Nenhum jogador cadastrado ainda</Text>
+                    <Text style={styles.panelText}>
+                      {canManagePlayers
+                        ? "Use o botao acima para montar o primeiro elenco da conta."
+                        : "O admin do grupo ainda nao cadastrou jogadores nesta conta."}
+                    </Text>
+                  </View>
                 )}
               </View>
-            ) : null}
+            </>
+          )}
 
-            <View style={styles.section}>
-              <View style={styles.inlineHeader}>
-                <View style={styles.inlineHeaderContent}>
-                  <Text style={styles.sectionTitle}>Jogadores da conta</Text>
-                  <Text style={styles.panelText}>
-                    {canManagePlayers
-                      ? "Gerencie aqui todos os jogadores da conta, com ou sem login no BoraJogar."
-                      : "Consulte aqui o elenco esportivo vinculado a esta conta."}
-                  </Text>
-                </View>
-                {canManagePlayers ? (
-                  <Pressable onPress={openCreatePlayerModal} style={styles.secondaryButton}>
-                    <Text style={styles.secondaryButtonText}>Novo jogador</Text>
-                  </Pressable>
-                ) : null}
-              </View>
-
-              {isLoading && accountPlayers.length === 0 ? (
-                <View style={styles.loadingCard}>
-                  <ActivityIndicator color={Colors.tint} />
-                  <Text style={styles.loadingText}>Carregando elenco da conta...</Text>
-                </View>
-              ) : accountPlayers.length > 0 ? (
-                accountPlayers.map((item) => (
-                  <View key={item.player.id} style={styles.playerCard}>
-                    <View style={styles.playerCardHeader}>
-                      <PlayerAvatar name={item.player.full_name} photoUrl={item.player.photo_url} />
-                      <View style={styles.flex}>
-                        <Text style={styles.playerName}>{item.player.full_name}</Text>
-                        <Text style={styles.playerMeta}>
-                          {item.player.email ?? "Sem email"} |{" "}
-                          {item.linkedProfile ? "Login vinculado" : "Sem login vinculado"}
-                        </Text>
-                        <Text style={styles.playerMeta}>
-                          Prioridade: {item.priorityGroup?.name ?? "Nao definida"}
-                        </Text>
-                      </View>
-                    </View>
-
-                    <View style={styles.inlineWrap}>
-                      <View style={styles.secondaryTag}>
-                        <Text style={styles.secondaryTagText}>
-                          Idade: {item.player.age !== null ? `${item.player.age} anos` : "Nao informada"}
-                        </Text>
-                      </View>
-                      <View style={styles.secondaryTag}>
-                        <Text style={styles.secondaryTagText}>
-                          Nota: {formatPlayerRating(item.player.rating)}
-                        </Text>
-                      </View>
-                      <View style={styles.secondaryTag}>
-                        <Text style={styles.secondaryTagText}>
-                          {item.player.is_default_for_weekly_list
-                            ? "Entra na base semanal"
-                            : "Fora da base semanal"}
-                        </Text>
-                      </View>
-                    </View>
-
-                    <Text style={styles.playerMeta}>
-                      Posicoes:{" "}
-                      {item.preferredPositions.length > 0
-                        ? item.preferredPositions.map((position) => position.name).join(", ")
-                        : "Nao informadas"}
-                    </Text>
-                    {item.player.notes ? (
-                      <Text style={styles.playerMeta}>Observacao: {item.player.notes}</Text>
-                    ) : null}
-
-                    {canManagePlayers ? (
-                      <View style={styles.listActions}>
-                        <Pressable
-                          onPress={() => openEditPlayerModal(item)}
-                          style={styles.inlineActionButton}>
-                          <Text style={styles.inlineActionText}>Editar</Text>
-                        </Pressable>
-                        <Pressable
-                          onPress={() => confirmDeactivatePlayer(item)}
-                          disabled={deletingPlayerId === item.player.id}
-                          style={[
-                            styles.inlineDangerButton,
-                            deletingPlayerId === item.player.id && styles.buttonDisabled,
-                          ]}>
-                          <Text style={styles.inlineDangerText}>
-                            {deletingPlayerId === item.player.id ? "Removendo..." : "Remover"}
-                          </Text>
-                        </Pressable>
-                      </View>
-                    ) : null}
-                  </View>
-                ))
-              ) : (
-                <View style={styles.panel}>
-                  <Text style={styles.panelTitle}>Nenhum jogador cadastrado ainda</Text>
-                  <Text style={styles.panelText}>
-                    {canManagePlayers
-                      ? "Use o botao acima para montar o primeiro elenco da conta."
-                      : "O admin do grupo ainda nao cadastrou jogadores nesta conta."}
-                  </Text>
-                </View>
-              )}
-            </View>
-          </>
-        )}
-
-        {message ? (
-          <View
-            style={[
-              styles.messageCard,
-              message.tone === "success" ? styles.messageSuccess : styles.messageError,
-            ]}>
-            <Text
+          {message ? (
+            <View
               style={[
-                styles.messageText,
-                message.tone === "success" ? styles.messageTextSuccess : styles.messageTextError,
+                styles.messageCard,
+                message.tone === "success" ? styles.messageSuccess : styles.messageError,
               ]}>
-              {message.text}
-            </Text>
-          </View>
-        ) : null}
+              <Text
+                style={[
+                  styles.messageText,
+                  message.tone === "success" ? styles.messageTextSuccess : styles.messageTextError,
+                ]}>
+                {message.text}
+              </Text>
+            </View>
+          ) : null}
+        </View>
       </ScrollView>
       {renderPlayerModal()}
     </>
@@ -1334,22 +1336,28 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.background,
   },
   content: {
-    padding: 20,
-    paddingBottom: 32,
+    paddingHorizontal: 16,
+    paddingTop: 16,
+    paddingBottom: 28,
+  },
+  contentInner: {
+    width: "100%",
+    maxWidth: 980,
+    alignSelf: "center",
     gap: 16,
   },
   header: {
-    gap: 8,
+    gap: 6,
   },
   title: {
     color: Colors.text,
-    fontSize: 30,
+    fontSize: 26,
     fontWeight: "900",
   },
   subtitle: {
     color: Colors.textMuted,
-    fontSize: 15,
-    lineHeight: 22,
+    fontSize: 14,
+    lineHeight: 21,
   },
   accountSwitcher: {
     flexDirection: "row",
@@ -1377,12 +1385,12 @@ const styles = StyleSheet.create({
     color: Colors.tint,
   },
   panel: {
-    borderRadius: 24,
+    borderRadius: 20,
     backgroundColor: Colors.surface,
     borderWidth: 1,
     borderColor: Colors.border,
-    padding: 18,
-    gap: 10,
+    padding: 16,
+    gap: 8,
   },
   panelTitle: {
     color: Colors.text,
@@ -1402,11 +1410,11 @@ const styles = StyleSheet.create({
   summaryCard: {
     minWidth: "30%",
     flexGrow: 1,
-    borderRadius: 22,
+    borderRadius: 18,
     backgroundColor: Colors.surface,
     borderWidth: 1,
     borderColor: Colors.border,
-    padding: 18,
+    padding: 14,
     gap: 6,
   },
   summaryValue: {
@@ -1421,7 +1429,7 @@ const styles = StyleSheet.create({
     textTransform: "uppercase",
   },
   section: {
-    gap: 12,
+    gap: 10,
   },
   sectionTitle: {
     color: Colors.text,
@@ -1466,12 +1474,12 @@ const styles = StyleSheet.create({
     fontWeight: "700",
   },
   playerCard: {
-    borderRadius: 22,
+    borderRadius: 18,
     backgroundColor: Colors.surface,
     borderWidth: 1,
     borderColor: Colors.border,
-    padding: 18,
-    gap: 12,
+    padding: 14,
+    gap: 10,
   },
   playerCardHeader: {
     flexDirection: "row",
