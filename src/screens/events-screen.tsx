@@ -1746,12 +1746,12 @@ export default function EventsScreen() {
   }) {
     return (
       <View style={styles.sectionCard}>
-        <View style={styles.inlineHeader}>
-          <View style={styles.inlineHeaderContent}>
+        <View style={styles.accordionHeader}>
+          <View style={styles.accordionHeaderContent}>
             <Text style={styles.workspaceTitle}>{title}</Text>
             <Text style={styles.panelText}>{subtitle}</Text>
           </View>
-          <View style={styles.listActions}>
+          <View style={styles.accordionHeaderActions}>
             {headerAction}
             <Pressable onPress={onToggle} style={styles.inlineActionButton}>
               <Text style={styles.inlineActionText}>{isExpanded ? "Recolher" : "Abrir"}</Text>
@@ -3075,6 +3075,15 @@ const styles = StyleSheet.create({
   feedbackErrorText: { color: "#9d3b2f" },
   inlineHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", gap: 12 },
   inlineHeaderContent: { flex: 1, gap: 6 },
+  accordionHeader: { flexDirection: "row", flexWrap: "wrap", alignItems: "flex-start", gap: 12 },
+  accordionHeaderContent: { flexGrow: 1, flexShrink: 1, flexBasis: 220, minWidth: 180, gap: 6 },
+  accordionHeaderActions: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    alignItems: "center",
+    gap: 8,
+    maxWidth: "100%",
+  },
   rowBetween: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12 },
   rowWithAvatar: { flexDirection: "row", alignItems: "center", gap: 10 },
   listActions: { flexDirection: "row", gap: 8, flexWrap: "wrap" },
