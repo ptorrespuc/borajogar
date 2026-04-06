@@ -2998,6 +2998,7 @@ export default function HomeScreen() {
                 </View>
               ) : (
                 <ScrollView
+                  style={styles.modalScroll}
                   contentContainerStyle={styles.modalContent}
                   keyboardShouldPersistTaps="handled"
                   showsVerticalScrollIndicator={false}>
@@ -3966,6 +3967,7 @@ export default function HomeScreen() {
               </View>
 
               <ScrollView
+                style={styles.modalScroll}
                 contentContainerStyle={styles.modalContent}
                 keyboardShouldPersistTaps="handled"
                 showsVerticalScrollIndicator={false}>
@@ -4721,6 +4723,7 @@ export default function HomeScreen() {
                 </View>
               ) : (
                 <ScrollView
+                  style={styles.modalScroll}
                   contentContainerStyle={styles.modalContent}
                   keyboardShouldPersistTaps="handled"
                   showsVerticalScrollIndicator={false}>
@@ -5549,6 +5552,9 @@ const styles = StyleSheet.create({
   },
   modalKeyboard: {
     width: "100%",
+    maxHeight: "100%",
+    flexShrink: 1,
+    justifyContent: "center",
   },
   modalCard: {
     maxHeight: "100%",
@@ -5560,6 +5566,9 @@ const styles = StyleSheet.create({
     borderColor: Colors.border,
     padding: 20,
     gap: 16,
+    flexShrink: 1,
+    minHeight: 0,
+    overflow: "hidden",
   },
   modalTitle: {
     color: Colors.text,
@@ -5569,6 +5578,11 @@ const styles = StyleSheet.create({
   modalContent: {
     gap: 12,
     paddingBottom: 12,
+  },
+  modalScroll: {
+    flexGrow: 0,
+    flexShrink: 1,
+    minHeight: 0,
   },
   modalLoading: {
     alignItems: "center",
