@@ -759,6 +759,10 @@ export default function EventsScreen() {
   const isWaitingForVisibleAccounts =
     isSuperAdmin &&
     (isLoadingSuperAdminAccounts || (superAdminAccounts.length > 0 && !selectedAccess));
+  const isWaitingForSelectedAccountData =
+    Boolean(selectedAccess) && !overview && (isLoading || message?.tone !== "error");
+  const isSelectedAccountDataUnavailable =
+    Boolean(selectedAccess) && !overview && !isLoading && message?.tone === "error";
 
   const canManageWeeklyList = Boolean(
     profile?.is_super_admin || selectedMembership?.membership.role === "group_admin",
@@ -2970,6 +2974,25 @@ export default function EventsScreen() {
           <View style={styles.panel}>
             <Text style={styles.panelTitle}>Nenhuma conta esportiva visivel</Text>
             <Text style={styles.panelText}>Assim que houver uma conta vinculada, os eventos aparecerao aqui como timeline principal.</Text>
+          </View>
+        ) : null}
+
+        {isWaitingForSelectedAccountData ? (
+          <View style={styles.panel}>
+            <ActivityIndicator color={Colors.tint} />
+            <Text style={styles.panelText}>Carregando evento atual e historico da conta...</Text>
+          </View>
+        ) : null}
+
+        {isSelectedAccountDataUnavailable ? (
+          <View style={styles.panel}>
+            <Text style={styles.panelTitle}>Nao foi possivel abrir os eventos desta conta</Text>
+            <Text style={styles.panelText}>
+              Tente novamente para recarregar a timeline, o quorum e as enquetes do grupo.
+            </Text>
+            <Pressable onPress={() => void reloadScreenData()} style={styles.secondaryButton}>
+              <Text style={styles.secondaryButtonText}>Tentar novamente</Text>
+            </Pressable>
           </View>
         ) : null}
 
