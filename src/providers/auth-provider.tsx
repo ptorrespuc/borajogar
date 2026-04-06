@@ -52,8 +52,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
-  async function hydrate(incomingSession?: Session | null) {
-    setIsLoading(true);
+  async function hydrate(incomingSession?: Session | null, options?: { silent?: boolean }) {
+    const silent = options?.silent ?? false;
+
+    if (!silent) {
+      setIsLoading(true);
+    }
+
     setError(null);
 
     try {
@@ -67,7 +72,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     } catch (nextError) {
       setError(getReadableError(nextError));
     } finally {
-      setIsLoading(false);
+      if (!silent) {
+        setIsLoading(false);
+      }
     }
   }
 
@@ -140,7 +147,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       await signOutFromSupabase();
     },
     refresh: async () => {
-      await hydrate(session);
+      await hydrate(session, { silent: true });
     },
   };
 

@@ -158,6 +158,7 @@ export type CreateAccountPlayerInput = {
   fullName: string;
   email: string | null;
   photoUrl: string | null;
+  birthDate?: string | null;
   age: number | null;
   rating: number | null;
   dominantSide?: DominantSide | null;
@@ -174,6 +175,7 @@ export type UpdateAccountPlayerInput = {
   fullName: string;
   email: string | null;
   photoUrl: string | null;
+  birthDate?: string | null;
   age: number | null;
   rating: number | null;
   dominantSide?: DominantSide | null;
@@ -189,6 +191,7 @@ export type UpsertAccountPlayerFromAccessInput = {
   fullName: string;
   email: string;
   photoUrl: string | null;
+  birthDate?: string | null;
   age: number | null;
   rating: number | null;
   dominantSide?: DominantSide | null;
@@ -335,7 +338,7 @@ const eventMatchTeamPlayerSelectFields =
   "id, team_id, account_player_id, modality_position_id, sort_order, created_at";
 
 const accountPlayerSelectFields =
-  "id, account_id, linked_profile_id, full_name, email, photo_url, age, rating, dominant_side, notes, priority_group_id, is_default_for_weekly_list, is_active, created_by, created_at, updated_at";
+  "id, account_id, linked_profile_id, full_name, email, photo_url, birth_date, age, rating, dominant_side, notes, priority_group_id, is_default_for_weekly_list, is_active, created_by, created_at, updated_at";
 
 function normalizeClockTime(value: string) {
   return value.length === 5 ? `${value}:00` : value;
@@ -2707,6 +2710,7 @@ export async function createAccountPlayer(input: CreateAccountPlayerInput) {
       full_name: input.fullName,
       email: normalizedEmail,
       photo_url: input.photoUrl,
+      birth_date: input.birthDate ?? null,
       age: input.age,
       rating: input.rating,
       dominant_side: input.dominantSide ?? null,
@@ -2753,6 +2757,8 @@ export async function updateAccountPlayer(input: UpdateAccountPlayerInput) {
       full_name: input.fullName,
       email: normalizedEmail,
       photo_url: input.photoUrl,
+      birth_date:
+        input.birthDate === undefined ? existingPlayer.birth_date : input.birthDate,
       age: input.age,
       rating: input.rating,
       dominant_side:
@@ -2810,6 +2816,7 @@ export async function upsertAccountPlayerFromAccess(
         fullName: input.fullName,
         email: normalizedEmail,
         photoUrl: input.photoUrl,
+        birthDate: input.birthDate,
         age: input.age,
         rating: input.rating,
         dominantSide: input.dominantSide,
@@ -2835,6 +2842,7 @@ export async function upsertAccountPlayerFromAccess(
     fullName: input.fullName,
     email: normalizedEmail,
     photoUrl: input.photoUrl,
+    birthDate: input.birthDate,
     age: input.age,
     rating: input.rating,
     dominantSide: input.dominantSide,

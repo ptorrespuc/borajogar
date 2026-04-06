@@ -102,6 +102,7 @@ export type AccountPlayer = {
   full_name: string;
   email: string | null;
   photo_url: string | null;
+  birth_date: string | null;
   age: number | null;
   rating: number | null;
   dominant_side: DominantSide | null;

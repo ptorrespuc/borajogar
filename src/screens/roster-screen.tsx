@@ -76,24 +76,48 @@ function getReadableError(error: unknown) {
   return "Nao foi possivel carregar o elenco.";
 }
 
-function parseOptionalPlayerAge(value: string) {
+function parseOptionalBirthDate(value: string) {
   const trimmed = value.trim();
 
   if (!trimmed) {
     return null;
   }
 
-  if (!/^\d+$/.test(trimmed)) {
-    throw new Error("A idade deve ser um numero inteiro.");
+  let normalized = trimmed;
+
+  if (/^\d{2}\/\d{2}\/\d{4}$/.test(trimmed)) {
+    const [day, month, year] = trimmed.split("/");
+    normalized = `${year}-${month}-${day}`;
   }
 
-  const age = Number(trimmed);
-
-  if (age < 0 || age > 120) {
-    throw new Error("A idade deve ficar entre 0 e 120 anos.");
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(normalized)) {
+    throw new Error("A data de nascimento deve estar em DD/MM/AAAA.");
   }
 
-  return age;
+  const [yearString, monthString, dayString] = normalized.split("-");
+  const year = Number(yearString);
+  const month = Number(monthString);
+  const day = Number(dayString);
+  const candidate = new Date(Date.UTC(year, month - 1, day));
+
+  if (
+    Number.isNaN(candidate.getTime()) ||
+    candidate.getUTCFullYear() !== year ||
+    candidate.getUTCMonth() !== month - 1 ||
+    candidate.getUTCDate() !== day
+  ) {
+    throw new Error("A data de nascimento informada nao e valida.");
+  }
+
+  const today = new Date();
+  const todayUtc = new Date(Date.UTC(today.getFullYear(), today.getMonth(), today.getDate()));
+  const minimumDate = new Date(Date.UTC(1900, 0, 1));
+
+  if (candidate > todayUtc || candidate < minimumDate) {
+    throw new Error("A data de nascimento deve ficar entre 01/01/1900 e hoje.");
+  }
+
+  return normalized;
 }
 
 function parseOptionalPlayerRating(value: string) {
@@ -123,6 +147,63 @@ function normalizeOptionalNotes(value: string) {
 
 function formatPlayerRating(value: number | null) {
   return value === null ? "Sem nota" : value.toFixed(2);
+}
+
+function formatBirthDateForInput(value: string | null) {
+  if (!value) {
+    return "";
+  }
+
+  const [year, month, day] = value.split("-");
+  return `${day}/${month}/${year}`;
+}
+
+function formatBirthDateForDisplay(value: string | null) {
+  if (!value) {
+    return "Nao informada";
+  }
+
+  return formatBirthDateForInput(value);
+}
+
+function getAgeFromBirthDate(value: string | null) {
+  if (!value) {
+    return null;
+  }
+
+  const [yearString, monthString, dayString] = value.split("-");
+  const year = Number(yearString);
+  const month = Number(monthString);
+  const day = Number(dayString);
+
+  if (!year || !month || !day) {
+    return null;
+  }
+
+  const today = new Date();
+  let age = today.getFullYear() - year;
+  const hasNotHadBirthdayYet =
+    today.getMonth() + 1 < month || (today.getMonth() + 1 === month && today.getDate() < day);
+
+  if (hasNotHadBirthdayYet) {
+    age -= 1;
+  }
+
+  return age >= 0 ? age : null;
+}
+
+function formatPlayerAgeFromProfile(input: { birthDate: string | null; fallbackAge: number | null }) {
+  const inferredAge = getAgeFromBirthDate(input.birthDate);
+
+  if (inferredAge !== null) {
+    return `${inferredAge} anos`;
+  }
+
+  if (input.fallbackAge !== null) {
+    return `${input.fallbackAge} anos`;
+  }
+
+  return "Nao informada";
 }
 
 function formatDominantSide(value: DominantSide | null) {
@@ -208,7 +289,7 @@ export default function RosterScreen() {
   const [playerPhotoTouched, setPlayerPhotoTouched] = useState(false);
   const [playerPriorityGroupDraftId, setPlayerPriorityGroupDraftId] = useState<string | null>(null);
   const [playerPreferredPositionIds, setPlayerPreferredPositionIds] = useState<string[]>([]);
-  const [playerAgeDraft, setPlayerAgeDraft] = useState("");
+  const [playerBirthDateDraft, setPlayerBirthDateDraft] = useState("");
   const [playerRatingDraft, setPlayerRatingDraft] = useState("");
   const [playerDominantSideDraft, setPlayerDominantSideDraft] = useState<DominantSide | null>(null);
   const [playerNotesDraft, setPlayerNotesDraft] = useState("");
@@ -363,7 +444,7 @@ export default function RosterScreen() {
     setPlayerPhotoTouched(false);
     setPlayerPriorityGroupDraftId(overview?.priorityGroups[0]?.id ?? null);
     setPlayerPreferredPositionIds([]);
-    setPlayerAgeDraft("");
+    setPlayerBirthDateDraft("");
     setPlayerRatingDraft("");
     setPlayerDominantSideDraft(null);
     setPlayerNotesDraft("");
@@ -385,7 +466,7 @@ export default function RosterScreen() {
     setPlayerPhotoTouched(false);
     setPlayerPriorityGroupDraftId(item.player.priority_group_id ?? overview?.priorityGroups[0]?.id ?? null);
     setPlayerPreferredPositionIds(item.preferredPositions.map((position) => position.id));
-    setPlayerAgeDraft(item.player.age !== null ? String(item.player.age) : "");
+    setPlayerBirthDateDraft(formatBirthDateForInput(item.player.birth_date));
     setPlayerRatingDraft(item.player.rating !== null ? item.player.rating.toFixed(2) : "");
     setPlayerDominantSideDraft(item.player.dominant_side);
     setPlayerNotesDraft(item.player.notes ?? "");
@@ -534,6 +615,7 @@ export default function RosterScreen() {
     fullName: string;
     normalizedEmail: string | null;
     linkedProfileId: string | null;
+    playerBirthDate: string | null;
     playerAge: number | null;
     playerRating: number | null;
     playerDominantSide: DominantSide | null;
@@ -555,6 +637,7 @@ export default function RosterScreen() {
         fullName: input.fullName,
         email: input.normalizedEmail,
         photoUrl: uploadedPhotoUrl,
+        birthDate: input.playerBirthDate,
         age: input.playerAge,
         rating: input.playerRating,
         dominantSide: input.playerDominantSide,
@@ -587,7 +670,7 @@ export default function RosterScreen() {
     setMessage(null);
 
     try {
-      const playerAge = parseOptionalPlayerAge(playerAgeDraft);
+      const playerBirthDate = parseOptionalBirthDate(playerBirthDateDraft);
       const playerNotes = normalizeOptionalNotes(playerNotesDraft);
       const desiredPhotoUrl = playerPhotoTouched
         ? playerPhotoUrlDraft.trim() || null
@@ -598,6 +681,7 @@ export default function RosterScreen() {
           profile.email?.trim().toLowerCase() ?? currentPlayer?.player.email?.trim().toLowerCase() ?? null;
         const playerRating = currentPlayer?.player.rating ?? null;
         const playerDominantSide = playerDominantSideDraft;
+        const playerAge = playerBirthDate ? null : currentPlayer?.player.age ?? null;
         const priorityGroupId =
           currentPlayer?.player.priority_group_id ??
           selectedMembership?.priorityGroup?.id ??
@@ -613,6 +697,7 @@ export default function RosterScreen() {
             fullName,
             email: normalizedEmail,
             photoUrl: desiredPhotoUrl,
+            birthDate: playerBirthDate,
             age: playerAge,
             rating: playerRating,
             dominantSide: playerDominantSide,
@@ -629,6 +714,7 @@ export default function RosterScreen() {
             fullName,
             email: normalizedEmail,
             photoUrl: desiredPhotoUrl,
+            birthDate: playerBirthDate,
             age: playerAge,
             rating: null,
             dominantSide: playerDominantSide,
@@ -649,6 +735,7 @@ export default function RosterScreen() {
             fullName,
             normalizedEmail,
             linkedProfileId: profile.id,
+            playerBirthDate,
             playerAge,
             playerRating,
             playerDominantSide,
@@ -686,6 +773,11 @@ export default function RosterScreen() {
       const normalizedPlayerEmail = playerEmailDraft.trim().toLowerCase() || null;
       const playerRating = parseOptionalPlayerRating(playerRatingDraft);
       const playerDominantSide = playerDominantSideDraft;
+      const editingPlayer =
+        playerModal?.mode === "edit" && playerModal.targetId
+          ? accountPlayers.find((item) => item.player.id === playerModal.targetId) ?? null
+          : null;
+      const playerAge = playerBirthDate ? null : editingPlayer?.player.age ?? null;
       let linkedProfileId = await resolveLinkedProfileId(normalizedPlayerEmail ?? "");
       let invitedAccess = false;
       let manualActionLink: string | null = null;
@@ -712,6 +804,7 @@ export default function RosterScreen() {
           fullName,
           email: normalizedPlayerEmail,
           photoUrl: desiredPhotoUrl,
+          birthDate: playerBirthDate,
           age: playerAge,
           rating: playerRating,
           dominantSide: playerDominantSide,
@@ -728,6 +821,7 @@ export default function RosterScreen() {
           fullName,
           email: normalizedPlayerEmail,
           photoUrl: desiredPhotoUrl,
+          birthDate: playerBirthDate,
           age: playerAge,
           rating: playerRating,
           dominantSide: playerDominantSide,
@@ -748,6 +842,7 @@ export default function RosterScreen() {
           fullName,
           normalizedEmail: normalizedPlayerEmail,
           linkedProfileId,
+          playerBirthDate,
           playerAge,
           playerRating,
           playerDominantSide,
@@ -759,7 +854,6 @@ export default function RosterScreen() {
       }
 
       await reloadSelectedAccountData();
-      await refresh();
       closePlayerModal();
 
       const sharedManualLink =
@@ -923,14 +1017,14 @@ export default function RosterScreen() {
 
                   <View style={styles.row}>
                     <View style={[styles.fieldBlock, styles.flex]}>
-                      <Text style={styles.label}>Idade</Text>
-                      <Text style={styles.fieldHint}>Opcional. Informe em anos.</Text>
+                      <Text style={styles.label}>Data de nascimento</Text>
+                      <Text style={styles.fieldHint}>Opcional. Use o formato DD/MM/AAAA.</Text>
                       <TextInput
-                        value={playerAgeDraft}
-                        onChangeText={setPlayerAgeDraft}
-                        placeholder="Ex.: 32"
+                        value={playerBirthDateDraft}
+                        onChangeText={setPlayerBirthDateDraft}
+                        placeholder="Ex.: 14/08/1992"
                         placeholderTextColor={Colors.textMuted}
-                        keyboardType="number-pad"
+                        keyboardType="numbers-and-punctuation"
                         style={styles.input}
                       />
                     </View>
@@ -1240,7 +1334,11 @@ export default function RosterScreen() {
                       <View style={styles.inlineWrap}>
                         <View style={styles.secondaryTag}>
                           <Text style={styles.secondaryTagText}>
-                            Idade: {currentPlayer.player.age !== null ? `${currentPlayer.player.age} anos` : "Nao informada"}
+                            Idade:{" "}
+                            {formatPlayerAgeFromProfile({
+                              birthDate: currentPlayer.player.birth_date,
+                              fallbackAge: currentPlayer.player.age,
+                            })}
                           </Text>
                         </View>
                         <View style={styles.secondaryTag}>
@@ -1262,6 +1360,9 @@ export default function RosterScreen() {
                         </View>
                       </View>
 
+                      <Text style={styles.playerMeta}>
+                        Nascimento: {formatBirthDateForDisplay(currentPlayer.player.birth_date)}
+                      </Text>
                       <Text style={styles.playerMeta}>
                         Posicoes:{" "}
                         {currentPlayer.preferredPositions.length > 0
@@ -1322,7 +1423,11 @@ export default function RosterScreen() {
                       <View style={styles.inlineWrap}>
                         <View style={styles.secondaryTag}>
                           <Text style={styles.secondaryTagText}>
-                            Idade: {item.player.age !== null ? `${item.player.age} anos` : "Nao informada"}
+                            Idade:{" "}
+                            {formatPlayerAgeFromProfile({
+                              birthDate: item.player.birth_date,
+                              fallbackAge: item.player.age,
+                            })}
                           </Text>
                         </View>
                         <View style={styles.secondaryTag}>
@@ -1344,6 +1449,9 @@ export default function RosterScreen() {
                         </View>
                       </View>
 
+                      <Text style={styles.playerMeta}>
+                        Nascimento: {formatBirthDateForDisplay(item.player.birth_date)}
+                      </Text>
                       <Text style={styles.playerMeta}>
                         Posicoes:{" "}
                         {item.preferredPositions.length > 0
