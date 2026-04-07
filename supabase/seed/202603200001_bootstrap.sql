@@ -11,6 +11,7 @@ set
   players_per_team = excluded.players_per_team,
   updated_at = timezone('utc', now());
 
+-- Posições compartilhadas entre futebol de campo e futebol de salão
 insert into public.modality_positions (modality_id, name, code, sort_order)
 select modality.id, position.name, position.code, position.sort_order
 from public.sport_modalities as modality
@@ -25,7 +26,31 @@ cross join (
     ('Zagueiro', 'zagueiro', 7),
     ('Meia', 'meia', 8)
 ) as position(name, code, sort_order)
-where modality.slug in ('futebol-campo', 'futebol-society', 'futebol-salao')
+where modality.slug in ('futebol-campo', 'futebol-salao')
+on conflict (modality_id, code) do update
+set
+  name = excluded.name,
+  sort_order = excluded.sort_order,
+  updated_at = timezone('utc', now());
+
+-- Posições do futebol society (meia desdobrada em central, esquerda e direita)
+insert into public.modality_positions (modality_id, name, code, sort_order)
+select modality.id, position.name, position.code, position.sort_order
+from public.sport_modalities as modality
+cross join (
+  values
+    ('Goleiro',       'goleiro',       1),
+    ('Fixo',          'fixo',          2),
+    ('Ala direita',   'ala-direita',   3),
+    ('Ala esquerda',  'ala-esquerda',  4),
+    ('Pivo',          'pivo',          5),
+    ('Atacante',      'atacante',      6),
+    ('Zagueiro',      'zagueiro',      7),
+    ('Meia central',  'meia-central',  8),
+    ('Meia esquerda', 'meia-esquerda', 9),
+    ('Meia direita',  'meia-direita',  10)
+) as position(name, code, sort_order)
+where modality.slug = 'futebol-society'
 on conflict (modality_id, code) do update
 set
   name = excluded.name,
