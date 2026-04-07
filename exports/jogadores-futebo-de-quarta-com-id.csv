@@ -1,0 +1,26 @@
+﻿id_jogador;nome;data de nascimento;nota;p? dominante;goleiro;zagueiro;lateral-direita;lateral-esquerda;volante;meia;ponta-direita;ponta-esquerda;centroavante
+92fd0a7f-04ac-4975-9c7f-1016df1ac2ad;Alê;;5,50;;;;;;;;;;1
+a5570b96-dbec-4268-bd98-d6c0951c1cd5;Álvaro;;7,00;Destro;;;;;;2;;;1
+a9381623-219a-4909-b559-bbe73278260c;Bento;;;;;;;;;;;;
+1ad24edc-d383-49ff-ad58-0d7e332fe09b;Bruno;;7,00;Destro;;1;;;;;;;2
+92fc79a5-e8cf-4059-8995-2b1e7026b3c0;Christian;;7,50;;;;3;2;1;4;;;
+5e15a89a-ea42-4aaf-8a78-44ed30f1bfcd;Daniel Alves;;6,70;;;;1;2;;;;;
+e90c90e0-f41c-41d7-b673-d92d68ed7757;Daniel Alves;;6,50;;;;1;2;;;;;
+96f62e78-ace7-4907-968d-2839e0b61159;Diogo;;7,70;;;3;4;5;2;1;;;
+61293188-77e1-413e-8f07-1a91ab3314f9;Eduardo;;7,00;;;2;1;3;;;;;
+1785ce5c-7206-49b3-b9c8-4818c04c0337;Evandro;;7,90;;;;3;4;;5;1;2;
+6d1b3bf1-f810-4d6b-aa5a-3060c1b54994;Fael;;7,00;;1;;;;;;;;
+378e1f08-eeac-445d-be0b-27f164b405c6;Gabriel Fontes;;8,30;;;5;;;2;1;3;4;
+f9d935f7-a8aa-4d15-accf-81f42fb9041b;Johann;;8,00;;;;;;;1;2;3;
+6c057ae5-ab23-4ea2-be05-49fe6a766955;Juan;;8,00;;;;;;;3;1;2;
+cbeef4c7-f432-425d-86bd-aa9c446481e8;Kadu;;7,90;;;1;;;;;;;2
+3a84df3d-9dc1-4850-b8aa-5168c9638827;Miguel;;8,00;;;;5;6;;4;1;2;3
+1f83d1fe-a07c-4ce2-ab3e-f01ecf4b27ba;Paulo;;8,00;;;;;;5;1;2;3;4
+f6f6d252-3f42-452d-b008-18150efcf532;Pedro Maia;;6,70;;;1;2;3;;;;;
+e7ef32e7-623c-4c52-bc60-af2a9789eb44;Rafael;;6,70;;;;5;;2;1;3;4;
+003abfa2-5fa2-437a-8baa-39fe0744f4fa;Raimundo;;6,90;;;;;1;2;3;;;
+095440ad-81da-444a-ae79-1aa92c558424;Victor;;7,50;;;;4;5;;;2;3;1
+3b4249ba-7d02-4d8d-9012-10f1fc4987eb;Wallace;;8,50;;1;;;;;;;;
+fab9327a-e65a-4ed8-bcea-6f8c120e003a;Zé Beltrão;;8,00;;;;;;;3;1;2;4
+99c61322-1af1-4f23-b7e4-84f7c849953d;Zé Lucas;;5,50;;;;1;3;;;2;4;
+a21a6188-5145-44ea-afd8-bdf40d11b591;Zé Luiz;;6,60;;;;2;1;;;;;
