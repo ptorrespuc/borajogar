@@ -2760,25 +2760,27 @@ export default function EventsScreen() {
                   <Text style={styles.label}>Titulo da partida</Text>
                   <TextInput value={matchTitleDraft} onChangeText={setMatchTitleDraft} style={styles.input} />
                 </View>
-                <View style={styles.row}>
-                  <View style={[styles.fieldBlock, styles.flex]}>
-                    <Text style={styles.label}>Placar time A</Text>
-                    <TextInput value={matchHomeScoreDraft} onChangeText={setMatchHomeScoreDraft} style={styles.input} keyboardType="number-pad" />
+                {matchModal.mode === "edit" && (
+                  <View style={styles.row}>
+                    <View style={[styles.fieldBlock, styles.flex]}>
+                      <Text style={styles.label}>Placar time A</Text>
+                      <TextInput value={matchHomeScoreDraft} onChangeText={setMatchHomeScoreDraft} style={styles.input} keyboardType="number-pad" />
+                    </View>
+                    <View style={[styles.fieldBlock, styles.flex]}>
+                      <Text style={styles.label}>Placar time B</Text>
+                      <TextInput value={matchAwayScoreDraft} onChangeText={setMatchAwayScoreDraft} style={styles.input} keyboardType="number-pad" />
+                    </View>
                   </View>
-                  <View style={[styles.fieldBlock, styles.flex]}>
-                    <Text style={styles.label}>Placar time B</Text>
-                    <TextInput value={matchAwayScoreDraft} onChangeText={setMatchAwayScoreDraft} style={styles.input} keyboardType="number-pad" />
-                  </View>
-                </View>
+                )}
 
                 {matchModal.mode === "create" && latestPreviousMatchTeams.length > 0 ? (
                   <View style={styles.formSection}>
-                    <Text style={styles.formSectionTitle}>Repetir time da partida anterior</Text>
-                    <Text style={styles.fieldHint}>
-                      {latestPreviousWinner
-                        ? `${latestPreviousMatch?.match.title ?? "Ultima partida"}: ${latestPreviousWinner.team.name} venceu e pode ser reaproveitado antes dos ajustes.`
-                        : `${latestPreviousMatch?.match.title ?? "Ultima partida"}: copie um dos times anteriores se um deles for continuar.`}
-                    </Text>
+                    <View style={styles.formSectionHeader}>
+                      <Text style={styles.formSectionTitle}>Repetir da partida anterior</Text>
+                      {latestPreviousWinner && (
+                        <Text style={styles.formSectionBadge}>{latestPreviousWinner.team.name} venceu</Text>
+                      )}
+                    </View>
 
                     {latestPreviousWinner ? (
                       <View style={styles.listActions}>
@@ -2822,40 +2824,39 @@ export default function EventsScreen() {
                 ) : null}
 
                 <View style={styles.formSection}>
-                  <Text style={styles.formSectionTitle}>Montagem automatica por posicao</Text>
-                  <Text style={styles.fieldHint}>
-                    Defina quantos jogadores cada time precisa em cada posicao. Depois selecione exatamente {requiredSelectedCount || "o total"} jogadores e gere os dois times.
-                  </Text>
+                  <View style={styles.formSectionHeader}>
+                    <Text style={styles.formSectionTitle}>Formacao</Text>
+                    {playersPerTeamTarget > 0 && (
+                      <Text style={styles.formSectionBadge}>{playersPerTeamTarget} por time · {requiredSelectedCount} no total</Text>
+                    )}
+                  </View>
 
                   {modalityPositions.length > 0 ? (
-                    <View style={styles.positionGrid}>
-                      {modalityPositions.map((position) => (
-                        <View key={position.id} style={styles.positionCountCard}>
-                          <Text style={styles.positionCountTitle}>{position.name}</Text>
-                          <TextInput
-                            value={matchFormationCounts[position.id] ?? "0"}
-                            onChangeText={(value) => updateMatchFormationCount(position.id, value)}
-                            keyboardType="number-pad"
-                            style={styles.positionCountInput}
-                          />
-                          <Text style={styles.positionCountHint}>por time</Text>
-                        </View>
-                      ))}
-                    </View>
+                    <>
+                      <Text style={styles.positionGridLabel}>Jogadores por time</Text>
+                      <View style={styles.positionGrid}>
+                        {modalityPositions.map((position) => (
+                          <View key={position.id} style={styles.positionCountCard}>
+                            <Text style={styles.positionCountTitle}>{position.name}</Text>
+                            <TextInput
+                              value={matchFormationCounts[position.id] ?? "0"}
+                              onChangeText={(value) => updateMatchFormationCount(position.id, value)}
+                              keyboardType="number-pad"
+                              style={styles.positionCountInput}
+                            />
+                          </View>
+                        ))}
+                      </View>
+                    </>
                   ) : (
                     <Text style={styles.panelText}>Cadastre as posicoes da modalidade antes de usar a montagem automatica.</Text>
                   )}
 
-                  <Text style={styles.selectionSummary}>
-                    Formacao por time: {playersPerTeamTarget} jogador(es) | Necessario para 2 times: {requiredSelectedCount}
-                  </Text>
-                  <Text style={styles.fieldHint}>
-                    {selectedParticipants.length === 0
-                      ? "Selecione os jogadores do quorum que vao entrar nessa partida."
-                      : selectedCountMatchesFormation
-                        ? "Quantidade selecionada pronta para gerar automaticamente."
-                        : `Voce selecionou ${selectedParticipants.length} jogador(es). Ajuste para ${requiredSelectedCount} ou altere a formacao.`}
-                  </Text>
+                  {selectedParticipants.length > 0 && !selectedCountMatchesFormation && (
+                    <Text style={styles.fieldHint}>
+                      {`Selecionados: ${selectedParticipants.length}. Necessario: ${requiredSelectedCount}.`}
+                    </Text>
+                  )}
 
                   <View style={styles.listActions}>
                     <Pressable
@@ -2880,10 +2881,14 @@ export default function EventsScreen() {
                 </View>
 
                 <View style={styles.formSection}>
-                  <Text style={styles.formSectionTitle}>Jogadores desta partida</Text>
-                  <Text style={styles.fieldHint}>
-                    Marque quem entrou nesse jogo antes de dividir os times. Jogadores sem nota contam como 5,00 no balanceamento automatico.
-                  </Text>
+                  <View style={styles.formSectionHeader}>
+                    <Text style={styles.formSectionTitle}>Jogadores</Text>
+                    {selectedParticipants.length > 0 && (
+                      <Text style={styles.formSectionBadge}>
+                        {selectedParticipants.length} sel. · A: {matchHomePlayerIds.length} ({homeTeamRating.toFixed(1)}) · B: {matchAwayPlayerIds.length} ({awayTeamRating.toFixed(1)})
+                      </Text>
+                    )}
+                  </View>
 
                   <View style={styles.listActions}>
                     <Pressable
@@ -2892,7 +2897,7 @@ export default function EventsScreen() {
                         setMatchSelectedPlayerIds(allPlayerIds);
                       }}
                       style={styles.secondaryButton}>
-                      <Text style={styles.secondaryButtonText}>Usar quorum inteiro</Text>
+                      <Text style={styles.secondaryButtonText}>Quorum inteiro</Text>
                     </Pressable>
                     <Pressable
                         onPress={() => {
@@ -2902,41 +2907,34 @@ export default function EventsScreen() {
                           setMatchAssignedPositionIds({});
                         }}
                         style={styles.secondaryButton}>
-                        <Text style={styles.secondaryButtonText}>Limpar selecao</Text>
+                        <Text style={styles.secondaryButtonText}>Limpar</Text>
                       </Pressable>
                     <Pressable
                       onPress={handleBalanceSelectedPlayers}
                       disabled={!canRunRatingBalance}
                       style={[styles.secondaryButton, !canRunRatingBalance && styles.buttonDisabled]}>
                       <Text style={styles.secondaryButtonText}>
-                        {selectedFormation.length > 0 ? "Balancear por nota e posicao" : "Balancear por nota"}
+                        {selectedFormation.length > 0 ? "Balancear" : "Balancear por nota"}
                       </Text>
                     </Pressable>
                   </View>
 
-                  <Text style={styles.selectionSummary}>
-                    Selecionados: {selectedParticipants.length} | {matchHomeTeamNameDraft.trim() || "Time A"}:{" "}
-                    {matchHomePlayerIds.length} ({homeTeamRating.toFixed(2)}) |{" "}
-                    {matchAwayTeamNameDraft.trim() || "Time B"}: {matchAwayPlayerIds.length} ({awayTeamRating.toFixed(2)})
-                  </Text>
-                  <Text style={styles.fieldHint}>
-                    {unassignedSelectedCount > 0
-                      ? `${unassignedSelectedCount} jogador(es) selecionado(s) ainda sem time.`
-                      : "Todos os selecionados ja estao alocados em um time."}
-                  </Text>
+                  {unassignedSelectedCount > 0 && (
+                    <Text style={styles.fieldHint}>{unassignedSelectedCount} selecionado(s) sem time.</Text>
+                  )}
 
                   <View style={styles.selectionList}>
                     {activeParticipants.map((item) => {
                       const isSelected = matchSelectedPlayerIds.includes(item.player.id);
                       const assignedPositionId = matchAssignedPositionIds[item.player.id];
                       const assignedPositionLabel = assignedPositionId
-                        ? positionNameById.get(assignedPositionId) ?? "Posicao definida"
+                        ? positionNameById.get(assignedPositionId) ?? null
                         : null;
                       const teamLabel = matchHomePlayerIds.includes(item.player.id)
                         ? matchHomeTeamNameDraft.trim() || "Time A"
                         : matchAwayPlayerIds.includes(item.player.id)
                           ? matchAwayTeamNameDraft.trim() || "Time B"
-                          : "Ainda sem time";
+                          : null;
 
                       return (
                         <Pressable
@@ -2944,18 +2942,13 @@ export default function EventsScreen() {
                           onPress={() => toggleMatchSelectedPlayer(item.player.id)}
                           style={[styles.playerPickerCard, isSelected && styles.playerPickerCardSelected]}>
                           <View style={styles.rowWithAvatar}>
-                            <PlayerAvatar name={item.player.full_name} photoUrl={item.player.photo_url} size={38} />
+                            <PlayerAvatar name={item.player.full_name} photoUrl={item.player.photo_url} size={36} />
                             <View style={styles.flex}>
                               <Text style={styles.playerPickerTitle}>{item.player.full_name}</Text>
                               <Text style={styles.playerPickerMeta}>
-                                Nota {formatPlayerRating(item.player.rating)} |{" "}
-                                {item.priorityGroup
-                                  ? `${item.priorityGroup.priority_rank}. ${item.priorityGroup.name}`
-                                  : "Sem prioridade"}
-                              </Text>
-                              <Text style={styles.playerPickerMeta}>
-                                {teamLabel}
-                                {assignedPositionLabel ? ` | ${assignedPositionLabel}` : ""}
+                                {formatPlayerRating(item.player.rating)}
+                                {teamLabel ? ` · ${teamLabel}` : ""}
+                                {assignedPositionLabel ? ` · ${assignedPositionLabel}` : ""}
                               </Text>
                             </View>
                           </View>
@@ -3276,14 +3269,17 @@ const styles = StyleSheet.create({
   modalScroll: { flexGrow: 0, flexShrink: 1, minHeight: 0 },
   modalContent: { gap: 18, paddingBottom: 12 },
   formSection: { gap: 14 },
+  formSectionHeader: { flexDirection: "row", alignItems: "center", gap: 8, flexWrap: "wrap" },
   formSectionTitle: { color: Colors.text, fontSize: 18, fontWeight: "800" },
+  formSectionBadge: { color: Colors.textMuted, fontSize: 12, fontWeight: "600", backgroundColor: "#edf4e7", borderRadius: 999, paddingHorizontal: 10, paddingVertical: 3 },
+  positionGridLabel: { color: Colors.textMuted, fontSize: 12, fontWeight: "600", textTransform: "uppercase", letterSpacing: 0.5 },
   fieldBlock: { gap: 8 },
   fieldHint: { color: Colors.textMuted, fontSize: 13, lineHeight: 19 },
   label: { color: Colors.text, fontSize: 14, fontWeight: "700" },
   input: { borderRadius: 18, borderWidth: 1, borderColor: "#d5dfd1", backgroundColor: "#f8faf5", paddingHorizontal: 16, paddingVertical: 14, color: Colors.text, fontSize: 16 },
   multilineInput: { minHeight: 96, textAlignVertical: "top" },
   positionGrid: { flexDirection: "row", flexWrap: "wrap", gap: 10 },
-  positionCountCard: { width: "31%", minWidth: 96, borderRadius: 18, borderWidth: 1, borderColor: "#dfe7d8", backgroundColor: "#f8faf5", padding: 12, gap: 8 },
+  positionCountCard: { width: "31%", minWidth: 96, borderRadius: 18, borderWidth: 1, borderColor: "#dfe7d8", backgroundColor: "#f8faf5", padding: 10, gap: 6, alignItems: "center" },
   positionCountTitle: { color: Colors.text, fontSize: 13, fontWeight: "800" },
   positionCountInput: { borderRadius: 14, borderWidth: 1, borderColor: "#d5dfd1", backgroundColor: "#ffffff", paddingHorizontal: 12, paddingVertical: 10, color: Colors.text, fontSize: 16, fontWeight: "700", textAlign: "center" },
   positionCountHint: { color: Colors.textMuted, fontSize: 12 },
