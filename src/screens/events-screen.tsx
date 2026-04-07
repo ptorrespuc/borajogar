@@ -625,6 +625,20 @@ function autoGenerateMatchTeamsByPositions(input: {
   };
 }
 
+function getPreviousMatchWinner(matchItem: EventMatchItem) {
+  if (!matchItem.homeTeam || !matchItem.awayTeam) {
+    return null;
+  }
+
+  if (matchItem.homeTeam.team.score === matchItem.awayTeam.team.score) {
+    return null;
+  }
+
+  return matchItem.homeTeam.team.score > matchItem.awayTeam.team.score
+    ? matchItem.homeTeam
+    : matchItem.awayTeam;
+}
+
 export default function EventsScreen() {
   const insets = useSafeAreaInsets();
   const { profile, memberships } = useAuth();
@@ -1509,6 +1523,40 @@ export default function EventsScreen() {
         tone: "error",
         text: "Selecione pelo menos 2 jogadores para balancear os times.",
       });
+      return;
+    }
+
+    const selectedFormation = getSelectedFormationPositions(modalityPositions, matchFormationCounts);
+    const playersPerTeamTarget = selectedFormation.reduce((total, item) => total + item.countPerTeam, 0);
+    const requiredSelectedCount = playersPerTeamTarget * 2;
+
+    if (selectedFormation.length > 0) {
+      if (selectedIds.length !== requiredSelectedCount) {
+        setMessage({
+          tone: "error",
+          text: `Para balancear respeitando a formacao, selecione exatamente ${requiredSelectedCount} jogadores.`,
+        });
+        return;
+      }
+
+      try {
+        const generatedTeams = autoGenerateMatchTeamsByPositions({
+          selectedPlayerIds: selectedIds,
+          participants: activeParticipants,
+          positions: modalityPositions,
+          formationCounts: matchFormationCounts,
+        });
+
+        setMatchHomePlayerIds(generatedTeams.homePlayerIds);
+        setMatchAwayPlayerIds(generatedTeams.awayPlayerIds);
+        setMatchAssignedPositionIds(generatedTeams.assignedPositionIds);
+        setMessage({
+          tone: "success",
+          text: `Times balanceados com posicoes e nota: ${generatedTeams.homeRating.toFixed(2)} x ${generatedTeams.awayRating.toFixed(2)}.`,
+        });
+      } catch (generationError) {
+        setMessage({ tone: "error", text: getReadableError(generationError) });
+      }
       return;
     }
 
@@ -2646,6 +2694,21 @@ export default function EventsScreen() {
         item.awayTeam ? { id: item.awayTeam.team.id, label: `${item.match.title} | ${item.awayTeam.team.name}` } : null,
       ])
       .filter((item): item is { id: string; label: string } => item !== null);
+    const latestPreviousMatch =
+      [...activeEventItem.matches]
+        .filter((item) => item.match.id !== currentMatch?.match.id)
+        .sort((first, second) => second.match.sort_order - first.match.sort_order)[0] ?? null;
+    const latestPreviousMatchTeams = latestPreviousMatch
+      ? [
+          latestPreviousMatch.homeTeam
+            ? { id: latestPreviousMatch.homeTeam.team.id, label: latestPreviousMatch.homeTeam.team.name }
+            : null,
+          latestPreviousMatch.awayTeam
+            ? { id: latestPreviousMatch.awayTeam.team.id, label: latestPreviousMatch.awayTeam.team.name }
+            : null,
+        ].filter((item): item is { id: string; label: string } => item !== null)
+      : [];
+    const latestPreviousWinner = latestPreviousMatch ? getPreviousMatchWinner(latestPreviousMatch) : null;
     const positionNameById = new Map(modalityPositions.map((position) => [position.id, position.name]));
     const selectedParticipants = activeParticipants.filter((item) =>
       matchSelectedPlayerIds.includes(item.player.id),
@@ -2655,6 +2718,8 @@ export default function EventsScreen() {
     const requiredSelectedCount = playersPerTeamTarget * 2;
     const selectedCountMatchesFormation =
       playersPerTeamTarget > 0 && selectedParticipants.length === requiredSelectedCount;
+    const canRunRatingBalance =
+      selectedFormation.length > 0 ? selectedCountMatchesFormation : matchSelectedPlayerIds.length >= 2;
     const unassignedSelectedCount = selectedParticipants.filter(
       (item) =>
         !matchHomePlayerIds.includes(item.player.id) && !matchAwayPlayerIds.includes(item.player.id),
@@ -2705,6 +2770,56 @@ export default function EventsScreen() {
                     <TextInput value={matchAwayScoreDraft} onChangeText={setMatchAwayScoreDraft} style={styles.input} keyboardType="number-pad" />
                   </View>
                 </View>
+
+                {matchModal.mode === "create" && latestPreviousMatchTeams.length > 0 ? (
+                  <View style={styles.formSection}>
+                    <Text style={styles.formSectionTitle}>Repetir time da partida anterior</Text>
+                    <Text style={styles.fieldHint}>
+                      {latestPreviousWinner
+                        ? `${latestPreviousMatch?.match.title ?? "Ultima partida"}: ${latestPreviousWinner.team.name} venceu e pode ser reaproveitado antes dos ajustes.`
+                        : `${latestPreviousMatch?.match.title ?? "Ultima partida"}: copie um dos times anteriores se um deles for continuar.`}
+                    </Text>
+
+                    {latestPreviousWinner ? (
+                      <View style={styles.listActions}>
+                        <Pressable
+                          onPress={() => copyExistingTeamToMatchDraft("home", latestPreviousWinner.team.id)}
+                          style={styles.secondaryButton}>
+                          <Text style={styles.secondaryButtonText}>{latestPreviousWinner.team.name} no Time A</Text>
+                        </Pressable>
+                        <Pressable
+                          onPress={() => copyExistingTeamToMatchDraft("away", latestPreviousWinner.team.id)}
+                          style={styles.secondaryButton}>
+                          <Text style={styles.secondaryButtonText}>{latestPreviousWinner.team.name} no Time B</Text>
+                        </Pressable>
+                      </View>
+                    ) : null}
+
+                    <Text style={styles.label}>Copiar para o Time A</Text>
+                    <View style={styles.chips}>
+                      {latestPreviousMatchTeams.map((team) => (
+                        <Pressable
+                          key={`previous-home-${team.id}`}
+                          onPress={() => copyExistingTeamToMatchDraft("home", team.id)}
+                          style={styles.chip}>
+                          <Text style={styles.chipText}>{team.label}</Text>
+                        </Pressable>
+                      ))}
+                    </View>
+
+                    <Text style={styles.label}>Copiar para o Time B</Text>
+                    <View style={styles.chips}>
+                      {latestPreviousMatchTeams.map((team) => (
+                        <Pressable
+                          key={`previous-away-${team.id}`}
+                          onPress={() => copyExistingTeamToMatchDraft("away", team.id)}
+                          style={styles.chip}>
+                          <Text style={styles.chipText}>{team.label}</Text>
+                        </Pressable>
+                      ))}
+                    </View>
+                  </View>
+                ) : null}
 
                 <View style={styles.formSection}>
                   <Text style={styles.formSectionTitle}>Montagem automatica por posicao</Text>
@@ -2791,9 +2906,11 @@ export default function EventsScreen() {
                       </Pressable>
                     <Pressable
                       onPress={handleBalanceSelectedPlayers}
-                      disabled={matchSelectedPlayerIds.length < 2}
-                      style={[styles.secondaryButton, matchSelectedPlayerIds.length < 2 && styles.buttonDisabled]}>
-                      <Text style={styles.secondaryButtonText}>Balancear por nota</Text>
+                      disabled={!canRunRatingBalance}
+                      style={[styles.secondaryButton, !canRunRatingBalance && styles.buttonDisabled]}>
+                      <Text style={styles.secondaryButtonText}>
+                        {selectedFormation.length > 0 ? "Balancear por nota e posicao" : "Balancear por nota"}
+                      </Text>
                     </Pressable>
                   </View>
 
