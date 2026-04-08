@@ -168,6 +168,38 @@ function formatEventDate(isoValue: string) {
   });
 }
 
+function formatEventWeekday(isoValue: string) {
+  return new Date(isoValue).toLocaleDateString("pt-BR", { weekday: "long" });
+}
+
+function formatEventDay(isoValue: string) {
+  return new Date(isoValue).toLocaleDateString("pt-BR", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  });
+}
+
+function formatEventTime(isoValue: string) {
+  return new Date(isoValue).toLocaleTimeString("pt-BR", {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function getEventStatusStyle(status: Event["status"]) {
+  switch (status) {
+    case "draft":
+      return { label: "Em montagem", bg: "#e8f3e8", text: "#2e6b2e", dot: "#4caf50" };
+    case "published":
+      return { label: "Lista fechada", bg: "#fff3e0", text: "#c45000", dot: "#ff9800" };
+    case "completed":
+      return { label: "Encerrado", bg: "#f3f4f6", text: "#4b5563", dot: "#9ca3af" };
+    case "cancelled":
+      return { label: "Cancelado", bg: "#fee2e2", text: "#b91c1c", dot: "#ef4444" };
+  }
+}
+
 function formatPollStatus(status: EventPollBallot["poll"]["status"]) {
   if (status === "open") {
     return "Aberta para votos";
@@ -395,6 +427,44 @@ function buildLineupInput(
     playerId,
     modalityPositionId: assignedPositionIds[playerId] ?? null,
   }));
+}
+
+/**
+ * Converte assignedPositionIds (playerId → modalityPositionId) em SlotAssignment[]
+ * (slotId → playerId, playerName) que o TacticalField consome.
+ *
+ * Cada slot da formação é usado no máximo uma vez; jogadores sem posição atribuída
+ * ou sem slot disponível são ignorados silenciosamente.
+ */
+function buildSlotAssignmentsFromPositions(
+  playerIds: string[],
+  assignedPositionIds: Record<string, string | null>,
+  formation: TacticalFormation | null,
+  participants: WeeklyEventParticipantItem[],
+): SlotAssignment[] {
+  if (!formation) return [];
+
+  const participantMap = new Map(participants.map((p) => [p.player.id, p]));
+  const usedSlotIds = new Set<string>();
+  const result: SlotAssignment[] = [];
+
+  for (const playerId of playerIds) {
+    const positionId = assignedPositionIds[playerId];
+    if (!positionId) continue;
+
+    const slot = formation.slots.find(
+      (s) => s.modality_position_id === positionId && !usedSlotIds.has(s.id),
+    );
+    if (!slot) continue;
+
+    const participant = participantMap.get(playerId);
+    if (!participant) continue;
+
+    usedSlotIds.add(slot.id);
+    result.push({ slotId: slot.id, playerId, playerName: participant.player.full_name });
+  }
+
+  return result;
 }
 
 function autoGenerateMatchTeamsByPositions(input: {
@@ -666,6 +736,8 @@ export default function EventsScreen() {
   const [historySectionsByEvent, setHistorySectionsByEvent] = useState<
     Record<string, Record<EventSectionKey, boolean>>
   >({});
+  const [viewedEventIndex, setViewedEventIndex] = useState(0);
+  const [activeEventTab, setActiveEventTab] = useState<EventSectionKey>("roster");
   const [weeklyPriorityFilter, setWeeklyPriorityFilter] = useState<string>("all");
   const [isLoading, setIsLoading] = useState(false);
   const [isCreatingEvent, setIsCreatingEvent] = useState(false);
@@ -927,6 +999,11 @@ export default function EventsScreen() {
   const historyItems = activeEventItem
     ? timeline.filter((item) => item.event.id !== activeEventItem.event.id)
     : timeline;
+  const viewedEventItem = timeline[viewedEventIndex] ?? null;
+  const isViewingActiveEvent = viewedEventItem?.event.id === activeEventItem?.event.id;
+  const viewedRoster = (viewedEventItem?.participants ?? []).filter(
+    (p) => p.participant.selection_status === "active",
+  );
   const activeParticipants = (activeEventItem?.participants ?? [])
     .filter((item) => item.participant.selection_status === "active")
     .sort((first, second) => {
@@ -1619,6 +1696,17 @@ export default function EventsScreen() {
         setMatchHomePlayerIds(generatedTeams.homePlayerIds);
         setMatchAwayPlayerIds(generatedTeams.awayPlayerIds);
         setMatchAssignedPositionIds(generatedTeams.assignedPositionIds);
+
+        // Sincroniza os slots do campo tático com as posições atribuídas
+        const homeFormation = tacticalFormations.find((f) => f.id === homeFormationId) ?? null;
+        const awayFormation = tacticalFormations.find((f) => f.id === awayFormationId) ?? null;
+        setHomeSlotAssignments(
+          buildSlotAssignmentsFromPositions(generatedTeams.homePlayerIds, generatedTeams.assignedPositionIds, homeFormation, activeParticipants),
+        );
+        setAwaySlotAssignments(
+          buildSlotAssignmentsFromPositions(generatedTeams.awayPlayerIds, generatedTeams.assignedPositionIds, awayFormation, activeParticipants),
+        );
+
         setMessage({
           tone: "success",
           text: `Times balanceados com posicoes e nota: ${generatedTeams.homeRating.toFixed(2)} x ${generatedTeams.awayRating.toFixed(2)}.`,
@@ -1633,6 +1721,9 @@ export default function EventsScreen() {
     setMatchHomePlayerIds(balancedTeams.homePlayerIds);
     setMatchAwayPlayerIds(balancedTeams.awayPlayerIds);
     setMatchAssignedPositionIds({});
+    // Sem posições atribuídas — limpa os slots do campo
+    setHomeSlotAssignments([]);
+    setAwaySlotAssignments([]);
     setMessage({
       tone: "success",
       text: `Times balanceados pela nota: ${balancedTeams.homeRating.toFixed(2)} x ${balancedTeams.awayRating.toFixed(2)}.`,
@@ -1651,6 +1742,17 @@ export default function EventsScreen() {
       setMatchHomePlayerIds(generatedTeams.homePlayerIds);
       setMatchAwayPlayerIds(generatedTeams.awayPlayerIds);
       setMatchAssignedPositionIds(generatedTeams.assignedPositionIds);
+
+      // Sincroniza os slots do campo tático com as posições atribuídas
+      const homeFormation = tacticalFormations.find((f) => f.id === homeFormationId) ?? null;
+      const awayFormation = tacticalFormations.find((f) => f.id === awayFormationId) ?? null;
+      setHomeSlotAssignments(
+        buildSlotAssignmentsFromPositions(generatedTeams.homePlayerIds, generatedTeams.assignedPositionIds, homeFormation, activeParticipants),
+      );
+      setAwaySlotAssignments(
+        buildSlotAssignmentsFromPositions(generatedTeams.awayPlayerIds, generatedTeams.assignedPositionIds, awayFormation, activeParticipants),
+      );
+
       setMessage({
         tone: "success",
         text: `Times gerados automaticamente: ${generatedTeams.homeRating.toFixed(2)} x ${generatedTeams.awayRating.toFixed(2)}.`,
@@ -2110,6 +2212,414 @@ export default function EventsScreen() {
         )}
       </View>
     );
+  }
+
+  // ── Novo header fixo ──────────────────────────────────────────────────────────
+
+  function renderEventHeader() {
+    const hasPrev = viewedEventIndex < timeline.length - 1;
+    const hasNext = viewedEventIndex > 0;
+
+    const tabConfig: { key: EventSectionKey; label: string; count: number }[] = [
+      {
+        key: "roster",
+        label: "Quórum",
+        count: viewedEventItem
+          ? viewedRoster.length
+          : 0,
+      },
+      {
+        key: "polls",
+        label: "Enquetes",
+        count: viewedEventItem
+          ? isViewingActiveEvent
+            ? eventPollBallots.length
+            : viewedEventItem.pollResults.length
+          : 0,
+      },
+      {
+        key: "matches",
+        label: "Partidas",
+        count: viewedEventItem?.matches.length ?? 0,
+      },
+    ];
+
+    return (
+      <View style={newStyles.header}>
+        {/* Seletor de conta (quando há mais de uma) */}
+        {availableAccounts.length > 1 ? (
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={newStyles.accountScroll}>
+            {availableAccounts.map((item) => {
+              const isSelected = item.account.id === selectedAccess?.account.id;
+              return (
+                <Pressable
+                  key={item.account.id}
+                  onPress={() => { setSelectedAccountId(item.account.id); setViewedEventIndex(0); }}
+                  style={[newStyles.accountChip, isSelected && newStyles.accountChipActive]}>
+                  <Text style={[newStyles.accountChipText, isSelected && newStyles.accountChipTextActive]}>
+                    {item.account.name}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </ScrollView>
+        ) : null}
+
+        {/* Data + navegação */}
+        {viewedEventItem ? (
+          <>
+            <View style={newStyles.navRow}>
+              <Pressable
+                onPress={() => { setViewedEventIndex((i) => i + 1); setActiveEventTab("roster"); }}
+                disabled={!hasPrev}
+                style={[newStyles.navBtn, !hasPrev && newStyles.navBtnDisabled]}>
+                <Text style={newStyles.navBtnText}>‹</Text>
+              </Pressable>
+
+              <View style={newStyles.navCenter}>
+                <Text style={newStyles.navWeekday}>{formatEventWeekday(viewedEventItem.event.starts_at)}</Text>
+                <Text style={newStyles.navDate}>{formatEventDay(viewedEventItem.event.starts_at)}</Text>
+              </View>
+
+              <Pressable
+                onPress={() => { setViewedEventIndex((i) => i - 1); setActiveEventTab("roster"); }}
+                disabled={!hasNext}
+                style={[newStyles.navBtn, !hasNext && newStyles.navBtnDisabled]}>
+                <Text style={newStyles.navBtnText}>›</Text>
+              </Pressable>
+            </View>
+
+            {/* Grupo + horário + status */}
+            <View style={newStyles.groupRow}>
+              <View style={newStyles.groupInfo}>
+                <Text style={newStyles.groupName} numberOfLines={1}>
+                  {selectedAccess?.account.name ?? ""}
+                </Text>
+                <Text style={newStyles.groupMeta} numberOfLines={1}>
+                  {overview?.modality.name} · {formatEventTime(viewedEventItem.event.starts_at)} – {formatEventTime(viewedEventItem.event.ends_at)}
+                </Text>
+              </View>
+              {(() => {
+                const s = getEventStatusStyle(viewedEventItem.event.status);
+                return (
+                  <View style={[newStyles.statusBadge, { backgroundColor: s.bg }]}>
+                    <View style={[newStyles.statusDot, { backgroundColor: s.dot }]} />
+                    <Text style={[newStyles.statusBadgeText, { color: s.text }]}>{s.label}</Text>
+                  </View>
+                );
+              })()}
+            </View>
+
+            {/* Ação admin de estado (só no evento ativo) */}
+            {isViewingActiveEvent && canManageWeeklyList ? (
+              <View style={newStyles.adminRow}>
+                {activeEventItem?.event.status === "draft" ? (
+                  <Pressable
+                    onPress={() => confirmCloseList(activeEventItem.event.id)}
+                    disabled={eventActionId === `close-${activeEventItem.event.id}`}
+                    style={[newStyles.adminBtn, (eventActionId === `close-${activeEventItem.event.id}`) && newStyles.adminBtnDisabled]}>
+                    <Text style={newStyles.adminBtnText}>
+                      {eventActionId === `close-${activeEventItem.event.id}` ? "Fechando lista…" : "Fechar lista"}
+                    </Text>
+                  </Pressable>
+                ) : activeEventItem?.event.status === "published" ? (
+                  <Pressable
+                    onPress={() => confirmCompleteEvent(activeEventItem.event.id)}
+                    disabled={eventActionId === `complete-${activeEventItem.event.id}`}
+                    style={[newStyles.adminBtn, newStyles.adminBtnDanger, (eventActionId === `complete-${activeEventItem.event.id}`) && newStyles.adminBtnDisabled]}>
+                    <Text style={[newStyles.adminBtnText, newStyles.adminBtnDangerText]}>
+                      {eventActionId === `complete-${activeEventItem.event.id}` ? "Encerrando…" : "Encerrar evento"}
+                    </Text>
+                  </Pressable>
+                ) : null}
+              </View>
+            ) : null}
+          </>
+        ) : null}
+
+        {/* Tab bar */}
+        <View style={newStyles.tabBar}>
+          {tabConfig.map((tab) => {
+            const isActive = activeEventTab === tab.key;
+            return (
+              <Pressable
+                key={tab.key}
+                onPress={() => setActiveEventTab(tab.key)}
+                style={newStyles.tabItem}>
+                <View style={newStyles.tabInner}>
+                  <Text style={[newStyles.tabLabel, isActive && newStyles.tabLabelActive]}>
+                    {tab.label}
+                  </Text>
+                  {tab.count > 0 ? (
+                    <View style={[newStyles.tabBadge, isActive && newStyles.tabBadgeActive]}>
+                      <Text style={[newStyles.tabBadgeText, isActive && newStyles.tabBadgeTextActive]}>
+                        {tab.count}
+                      </Text>
+                    </View>
+                  ) : null}
+                </View>
+                {isActive ? <View style={newStyles.tabIndicator} /> : null}
+              </Pressable>
+            );
+          })}
+        </View>
+      </View>
+    );
+  }
+
+  // ── Conteúdo das tabs ─────────────────────────────────────────────────────────
+
+  function renderTabContent() {
+    if (!selectedAccess || !overview) {
+      return null;
+    }
+
+    // Sem evento ativo: mostrar painel de criação para admins
+    if (!viewedEventItem) {
+      return (
+        <View style={styles.sectionCard}>
+          <Text style={styles.workspaceTitle}>Nenhum evento ativo</Text>
+          <Text style={styles.panelText}>
+            Nao ha chamada aberta agora. Quando voce criar a chamada, o BoraJogar monta a lista inicial com quem entra sempre.
+          </Text>
+          {canManageWeeklyList ? (
+            <Pressable
+              onPress={() => void handleCreateWeeklyEvent()}
+              disabled={isCreatingEvent}
+              style={[styles.primaryButton, isCreatingEvent && styles.buttonDisabled]}>
+              {isCreatingEvent ? (
+                <ActivityIndicator color="#ffffff" />
+              ) : (
+                <Text style={styles.primaryButtonText}>Criar chamada para jogo</Text>
+              )}
+            </Pressable>
+          ) : (
+            <Text style={styles.panelText}>Aguarde o administrador criar a proxima chamada.</Text>
+          )}
+        </View>
+      );
+    }
+
+    const isDraft = isViewingActiveEvent && activeEventItem?.event.status === "draft";
+    const isPublished = isViewingActiveEvent && activeEventItem?.event.status === "published";
+    const canEdit = isViewingActiveEvent && (canManageWeeklyList || canManageWeeklyPolls);
+
+    // ── QUÓRUM ────────────────────────────────────────────────────────────────
+    if (activeEventTab === "roster") {
+      const quorumPct = Math.min(
+        100,
+        viewedEventItem.event.max_players > 0
+          ? Math.round((viewedRoster.length / viewedEventItem.event.max_players) * 100)
+          : 0,
+      );
+      const quorumReached = viewedRoster.length >= viewedEventItem.event.max_players;
+
+      return (
+        <View style={newStyles.tabContent}>
+          {/* Progresso do quórum */}
+          <View style={newStyles.quorumCard}>
+            <View style={newStyles.quorumCardRow}>
+              <View>
+                <Text style={newStyles.quorumCount}>
+                  {viewedRoster.length}
+                  <Text style={newStyles.quorumMax}>/{viewedEventItem.event.max_players}</Text>
+                </Text>
+                <Text style={newStyles.quorumLabel}>Confirmações / mínimo</Text>
+              </View>
+              <View style={[newStyles.quorumPill, quorumReached ? newStyles.quorumPillOk : newStyles.quorumPillPending]}>
+                <Text style={[newStyles.quorumPillText, quorumReached ? newStyles.quorumPillTextOk : newStyles.quorumPillTextPending]}>
+                  {quorumReached ? "✓ Quórum atingido" : `Faltam ${viewedEventItem.event.max_players - viewedRoster.length}`}
+                </Text>
+              </View>
+            </View>
+            <View style={newStyles.progressTrack}>
+              <View
+                style={[
+                  newStyles.progressBar,
+                  { width: `${quorumPct}%` as unknown as number },
+                  quorumReached ? newStyles.progressBarOk : newStyles.progressBarPending,
+                ]}
+              />
+            </View>
+          </View>
+
+          {/* Em montagem: dois painéis (Na lista / Fora da lista) */}
+          {isDraft ? (
+            <View style={newStyles.draftColumns}>
+              {/* Na lista */}
+              <View style={newStyles.draftColumn}>
+                <Text style={newStyles.columnTitle}>Na lista</Text>
+                {activeParticipants.length > 0 ? (
+                  activeParticipants.map((item) => (
+                    <View key={item.participant.id} style={newStyles.playerRow}>
+                      <PlayerAvatar name={item.player.full_name} photoUrl={item.player.photo_url} size={36} />
+                      <View style={newStyles.flex}>
+                        <Text style={newStyles.playerName}>{item.player.full_name}</Text>
+                        <Text style={newStyles.playerMeta}>
+                          {item.preferredPositions.length > 0
+                            ? item.preferredPositions.map((p) => p.name).join(", ")
+                            : "Posições não informadas"}
+                        </Text>
+                      </View>
+                      {canManageWeeklyList ? (
+                        <Pressable
+                          onPress={() => void handleRemovePlayerFromWeeklyList(item)}
+                          disabled={eventActionId === item.participant.id}
+                          style={newStyles.inlineDanger}>
+                          <Text style={newStyles.inlineDangerText}>
+                            {eventActionId === item.participant.id ? "…" : "Retirar"}
+                          </Text>
+                        </Pressable>
+                      ) : null}
+                    </View>
+                  ))
+                ) : (
+                  <Text style={newStyles.emptyText}>Nenhum jogador ainda.</Text>
+                )}
+              </View>
+
+              {/* Fora da lista */}
+              <View style={newStyles.draftColumn}>
+                <Text style={newStyles.columnTitle}>Fora</Text>
+                {availableWeeklyPlayers.length > 0 ? (
+                  availableWeeklyPlayers.map((item) => (
+                    <View key={item.player.id} style={newStyles.playerRow}>
+                      <PlayerAvatar name={item.player.full_name} photoUrl={item.player.photo_url} size={36} />
+                      <View style={newStyles.flex}>
+                        <Text style={newStyles.playerName}>{item.player.full_name}</Text>
+                      </View>
+                      {canManageWeeklyList ? (
+                        <Pressable
+                          onPress={() => void handleAddPlayerToWeeklyList(item)}
+                          disabled={eventActionId === item.player.id}
+                          style={newStyles.inlineAction}>
+                          <Text style={newStyles.inlineActionText}>
+                            {eventActionId === item.player.id ? "…" : "Incluir"}
+                          </Text>
+                        </Pressable>
+                      ) : null}
+                    </View>
+                  ))
+                ) : (
+                  <Text style={newStyles.emptyText}>Todos incluídos.</Text>
+                )}
+              </View>
+            </View>
+          ) : (
+            // Lista consolidada (evento fechado ou histórico)
+            <View>
+              <Text style={newStyles.sectionLabel}>Confirmados ({viewedRoster.length})</Text>
+              {viewedRoster.length > 0 ? (
+                viewedRoster.map((item) => (
+                  <View key={item.participant.id} style={newStyles.playerCard}>
+                    <PlayerAvatar name={item.player.full_name} photoUrl={item.player.photo_url} size={36} />
+                    <View style={newStyles.flex}>
+                      <Text style={newStyles.playerName}>{item.player.full_name}</Text>
+                      {item.preferredPositions.length > 0 ? (
+                        <Text style={newStyles.playerMeta}>
+                          {item.preferredPositions.map((p) => p.name).join(", ")}
+                        </Text>
+                      ) : null}
+                    </View>
+                  </View>
+                ))
+              ) : (
+                <Text style={newStyles.emptyText}>Nenhum jogador registrado.</Text>
+              )}
+            </View>
+          )}
+        </View>
+      );
+    }
+
+    // ── ENQUETES ──────────────────────────────────────────────────────────────
+    if (activeEventTab === "polls") {
+      return (
+        <View style={newStyles.tabContent}>
+          {/* Botão nova enquete (admin + evento ativo + publicado) */}
+          {isPublished && canManageWeeklyPolls ? (
+            <Pressable onPress={openCreateEventPollModal} style={newStyles.addButton}>
+              <Text style={newStyles.addButtonText}>+ Nova enquete</Text>
+            </Pressable>
+          ) : null}
+
+          {isViewingActiveEvent ? (
+            eventPollBallots.length > 0 ? (
+              <View style={newStyles.sectionStack}>
+                {eventPollBallots.map((ballot) => renderPollCard(ballot))}
+              </View>
+            ) : (
+              <View style={newStyles.emptyState}>
+                <Text style={newStyles.emptyStateEmoji}>🗳️</Text>
+                <Text style={newStyles.emptyStateTitle}>Nenhuma enquete</Text>
+                <Text style={newStyles.emptyStateText}>
+                  {isPublished ? "Crie a primeira enquete para este evento." : "As enquetes ficam disponíveis após fechar a lista."}
+                </Text>
+              </View>
+            )
+          ) : (
+            viewedEventItem.pollResults.length > 0 ? (
+              <View style={newStyles.sectionStack}>
+                {viewedEventItem.pollResults.map((summary) => (
+                  <View key={summary.poll.id} style={newStyles.pollCard}>
+                    <Text style={newStyles.pollTitle}>{summary.poll.title}</Text>
+                    <Text style={newStyles.pollMeta}>{summary.totalVotes} voto(s)</Text>
+                    {summary.entries.map((entry) => (
+                      <View key={entry.id} style={newStyles.pollEntry}>
+                        <PlayerAvatar name={entry.label} photoUrl={entry.photoUrl} size={28} />
+                        <Text style={newStyles.pollEntryLabel}>{entry.label}</Text>
+                        <Text style={newStyles.pollEntryVotes}>{entry.votes}</Text>
+                      </View>
+                    ))}
+                  </View>
+                ))}
+              </View>
+            ) : (
+              <View style={newStyles.emptyState}>
+                <Text style={newStyles.emptyStateEmoji}>🗳️</Text>
+                <Text style={newStyles.emptyStateTitle}>Sem enquetes</Text>
+                <Text style={newStyles.emptyStateText}>Nenhuma enquete foi registrada neste evento.</Text>
+              </View>
+            )
+          )}
+        </View>
+      );
+    }
+
+    // ── PARTIDAS ──────────────────────────────────────────────────────────────
+    if (activeEventTab === "matches") {
+      return (
+        <View style={newStyles.tabContent}>
+          {/* Botão nova partida (admin + ativo + publicado) */}
+          {isPublished && canEdit ? (
+            <Pressable onPress={openCreateMatchModal} style={newStyles.addButton}>
+              <Text style={newStyles.addButtonText}>+ Nova partida</Text>
+            </Pressable>
+          ) : null}
+
+          {viewedEventItem.matches.length > 0 ? (
+            renderMatchesSection(
+              viewedEventItem.matches,
+              viewedEventItem.participants,
+              isPublished && canManageWeeklyPolls,
+            )
+          ) : (
+            <View style={newStyles.emptyState}>
+              <Text style={newStyles.emptyStateEmoji}>⚽</Text>
+              <Text style={newStyles.emptyStateTitle}>Sem partidas</Text>
+              <Text style={newStyles.emptyStateText}>
+                {isPublished ? "Adicione a primeira partida do evento." : "As partidas ficam disponíveis após fechar a lista."}
+              </Text>
+            </View>
+          )}
+        </View>
+      );
+    }
+
+    return null;
   }
 
   function renderActiveEventWorkspace() {
@@ -3133,104 +3643,59 @@ export default function EventsScreen() {
   }
 
   return (
-    <>
-      <ScrollView style={styles.screen} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
-        <View style={styles.contentInner}>
-          <View style={styles.hero}>
-            <Text style={styles.heroKicker}>Eventos</Text>
-            <Text style={styles.heroTitle}>
-              {selectedAccess ? `Eventos - ${selectedAccess.account.name}` : "Eventos"}
-            </Text>
-            <Text style={styles.heroSubtitle}>
-              Veja a chamada atual, vote nas enquetes e acompanhe o historico do grupo.
-            </Text>
+    <View style={{ flex: 1, backgroundColor: "#f4f6ef" }}>
+      {/* Header fixo com navegação, grupo, status e tabs */}
+      {renderEventHeader()}
+
+      <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ padding: 16, paddingBottom: 40 }}>
+        {/* Estados de carregamento / erro */}
+        {isWaitingForVisibleAccounts ? (
+          <View style={styles.panel}>
+            <ActivityIndicator color={Colors.tint} />
+            <Text style={styles.panelText}>Carregando contas esportivas...</Text>
           </View>
+        ) : null}
 
-          {availableAccounts.length > 1 ? (
-            <View style={styles.accountSwitcher}>
-              {availableAccounts.map((item) => {
-                const isSelected = item.account.id === selectedAccess?.account.id;
-                return (
-                  <Pressable key={item.account.id} onPress={() => setSelectedAccountId(item.account.id)} style={[styles.accountChip, isSelected && styles.accountChipSelected]}>
-                    <Text style={[styles.accountChipText, isSelected && styles.accountChipTextSelected]}>{item.account.name}</Text>
-                  </Pressable>
-                );
-              })}
-            </View>
-          ) : null}
+        {!selectedAccess && !isWaitingForVisibleAccounts ? (
+          <View style={styles.panel}>
+            <Text style={styles.panelTitle}>Nenhuma conta esportiva visivel</Text>
+            <Text style={styles.panelText}>Assim que houver uma conta vinculada, os eventos aparecerao aqui como timeline principal.</Text>
+          </View>
+        ) : null}
 
-          {isWaitingForVisibleAccounts ? (
-            <View style={styles.panel}>
-              <ActivityIndicator color={Colors.tint} />
-              <Text style={styles.panelText}>Carregando contas esportivas...</Text>
-            </View>
-          ) : null}
+        {isWaitingForSelectedAccountData ? (
+          <View style={styles.panel}>
+            <ActivityIndicator color={Colors.tint} />
+            <Text style={styles.panelText}>Carregando evento atual e historico da conta...</Text>
+          </View>
+        ) : null}
 
-          {!selectedAccess && !isWaitingForVisibleAccounts ? (
-            <View style={styles.panel}>
-              <Text style={styles.panelTitle}>Nenhuma conta esportiva visivel</Text>
-              <Text style={styles.panelText}>Assim que houver uma conta vinculada, os eventos aparecerao aqui como timeline principal.</Text>
-            </View>
-          ) : null}
+        {isSelectedAccountDataUnavailable ? (
+          <View style={styles.panel}>
+            <Text style={styles.panelTitle}>Nao foi possivel abrir os eventos desta conta</Text>
+            <Text style={styles.panelText}>
+              Tente novamente para recarregar a timeline, o quorum e as enquetes do grupo.
+            </Text>
+            <Pressable onPress={() => void reloadScreenData()} style={styles.secondaryButton}>
+              <Text style={styles.secondaryButtonText}>Tentar novamente</Text>
+            </Pressable>
+          </View>
+        ) : null}
 
-          {isWaitingForSelectedAccountData ? (
-            <View style={styles.panel}>
-              <ActivityIndicator color={Colors.tint} />
-              <Text style={styles.panelText}>Carregando evento atual e historico da conta...</Text>
-            </View>
-          ) : null}
+        {/* Banner de feedback */}
+        {message ? (
+          <View style={[styles.feedbackBanner, message.tone === "error" ? styles.feedbackError : styles.feedbackSuccess, { marginBottom: 12 }]}>
+            <Text style={[styles.feedbackText, message.tone === "error" ? styles.feedbackErrorText : styles.feedbackSuccessText]}>{message.text}</Text>
+          </View>
+        ) : null}
 
-          {isSelectedAccountDataUnavailable ? (
-            <View style={styles.panel}>
-              <Text style={styles.panelTitle}>Nao foi possivel abrir os eventos desta conta</Text>
-              <Text style={styles.panelText}>
-                Tente novamente para recarregar a timeline, o quorum e as enquetes do grupo.
-              </Text>
-              <Pressable onPress={() => void reloadScreenData()} style={styles.secondaryButton}>
-                <Text style={styles.secondaryButtonText}>Tentar novamente</Text>
-              </Pressable>
-            </View>
-          ) : null}
-
-          {selectedAccess && overview ? (
-            <>
-              {message ? (
-                <View style={[styles.feedbackBanner, message.tone === "error" ? styles.feedbackError : styles.feedbackSuccess]}>
-                  <Text style={[styles.feedbackText, message.tone === "error" ? styles.feedbackErrorText : styles.feedbackSuccessText]}>{message.text}</Text>
-                </View>
-              ) : null}
-
-              {isLoading ? (
-                <View style={styles.panel}>
-                  <ActivityIndicator color={Colors.tint} />
-                  <Text style={styles.panelText}>Carregando eventos da conta...</Text>
-                </View>
-              ) : (
-                <>
-                  {renderActiveEventWorkspace()}
-                  <View style={styles.section}>
-                    <View style={styles.inlineHeader}>
-                      <View style={styles.inlineHeaderContent}>
-                        <Text style={styles.workspaceTitle}>Historico de eventos</Text>
-                        <Text style={styles.panelText}>Navegue pelos eventos mais recentes do grupo, do mais novo para o mais antigo.</Text>
-                      </View>
-                    </View>
-
-                    {historyItems.length > 0 ? historyItems.map((item) => renderHistoryItem(item)) : (
-                      <View style={styles.panel}>
-                        <Text style={styles.panelText}>Ainda nao ha eventos anteriores para consultar.</Text>
-                      </View>
-                    )}
-                  </View>
-                </>
-              )}
-            </>
-          ) : null}
-        </View>
+        {/* Conteúdo principal das tabs (inclui painel de criar evento quando não há ativo) */}
+        {selectedAccess && overview ? renderTabContent() : null}
       </ScrollView>
+
       {renderEventPollModal()}
       {renderMatchModal()}
-    </>
+    </View>
   );
 }
 
@@ -3379,4 +3844,476 @@ const styles = StyleSheet.create({
   optionCard: { borderRadius: 20, borderWidth: 1, borderColor: "#dfe7d8", backgroundColor: "#f8faf5", padding: 14, gap: 12 },
   linkDanger: { color: "#a24335", fontWeight: "800" },
   row: { flexDirection: "row", gap: 12 },
+});
+
+// ─── Estilos do novo layout (header fixo + tabs) ──────────────────────────────
+
+const newStyles = StyleSheet.create({
+  // Header fixo
+  header: {
+    backgroundColor: "#ffffff",
+    borderBottomWidth: 1,
+    borderBottomColor: "#e2eadb",
+    paddingTop: 0,
+    elevation: 2,
+    shadowColor: "#000",
+    shadowOpacity: 0.06,
+    shadowRadius: 4,
+    shadowOffset: { width: 0, height: 2 },
+  },
+  navRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    gap: 8,
+  },
+  navBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: "#edf4e7",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  navBtnDisabled: {
+    opacity: 0.35,
+  },
+  navBtnText: {
+    fontSize: 18,
+    color: Colors.tint,
+    fontWeight: "700",
+    lineHeight: 22,
+  },
+  navCenter: {
+    flex: 1,
+    alignItems: "center",
+    gap: 2,
+  },
+  navWeekday: {
+    color: Colors.textMuted,
+    fontSize: 11,
+    fontWeight: "700",
+    textTransform: "uppercase",
+    letterSpacing: 0.8,
+  },
+  navDate: {
+    color: Colors.text,
+    fontSize: 15,
+    fontWeight: "800",
+  },
+  navTime: {
+    color: Colors.textMuted,
+    fontSize: 12,
+    fontWeight: "600",
+  },
+  groupRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 16,
+    paddingBottom: 10,
+    gap: 10,
+  },
+  groupAvatar: {
+    width: 38,
+    height: 38,
+    borderRadius: 10,
+    backgroundColor: Colors.tint,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  groupAvatarText: {
+    color: "#ffffff",
+    fontSize: 16,
+    fontWeight: "900",
+  },
+  groupInfo: {
+    flex: 1,
+    gap: 2,
+  },
+  groupName: {
+    color: Colors.text,
+    fontSize: 15,
+    fontWeight: "800",
+  },
+  groupMeta: {
+    color: Colors.textMuted,
+    fontSize: 12,
+    fontWeight: "600",
+  },
+  statusBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderWidth: 1,
+  },
+  statusDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+  },
+  statusBadgeText: {
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  adminRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 6,
+    paddingHorizontal: 16,
+    paddingBottom: 10,
+  },
+  adminBtn: {
+    borderRadius: 999,
+    backgroundColor: "#edf4e7",
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+  },
+  adminBtnActive: {
+    backgroundColor: Colors.tint,
+  },
+  adminBtnText: {
+    color: Colors.tint,
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  adminBtnTextActive: {
+    color: "#ffffff",
+  },
+  adminBtnDanger: {
+    backgroundColor: "#fee2e2",
+  },
+  adminBtnDangerText: {
+    color: "#b91c1c",
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  adminBtnDisabled: {
+    opacity: 0.5,
+  },
+  // Account switcher no header
+  accountScroll: {
+    paddingHorizontal: 16,
+    paddingBottom: 8,
+  },
+  accountChip: {
+    borderRadius: 999,
+    backgroundColor: "#e4ecde",
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+    marginRight: 8,
+  },
+  accountChipActive: {
+    backgroundColor: Colors.tint,
+  },
+  accountChipText: {
+    color: Colors.tint,
+    fontSize: 13,
+    fontWeight: "700",
+  },
+  accountChipTextActive: {
+    color: "#ffffff",
+  },
+  // Flex utility
+  flex: {
+    flex: 1,
+  },
+  // Player card (confirmados view)
+  playerCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    backgroundColor: "#ffffff",
+    borderRadius: 12,
+    padding: 10,
+    borderWidth: 1,
+    borderColor: "#e2eadb",
+  },
+  // Tab bar
+  tabBar: {
+    flexDirection: "row",
+    borderTopWidth: 1,
+    borderTopColor: "#e2eadb",
+  },
+  tabItem: {
+    flex: 1,
+    alignItems: "center",
+    paddingVertical: 10,
+    position: "relative",
+  },
+  tabInner: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  tabLabel: {
+    color: Colors.textMuted,
+    fontSize: 13,
+    fontWeight: "700",
+  },
+  tabLabelActive: {
+    color: Colors.tint,
+  },
+  tabBadge: {
+    borderRadius: 999,
+    backgroundColor: "#e4ecde",
+    minWidth: 20,
+    height: 20,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 5,
+  },
+  tabBadgeActive: {
+    backgroundColor: Colors.tint,
+  },
+  tabBadgeText: {
+    color: Colors.textMuted,
+    fontSize: 11,
+    fontWeight: "800",
+  },
+  tabBadgeTextActive: {
+    color: "#ffffff",
+  },
+  tabIndicator: {
+    position: "absolute",
+    bottom: 0,
+    left: "15%",
+    right: "15%",
+    height: 3,
+    borderRadius: 2,
+    backgroundColor: Colors.tint,
+  },
+  // Conteúdo das tabs
+  tabContent: {
+    gap: 14,
+  },
+  // Quórum card
+  quorumCard: {
+    backgroundColor: "#ffffff",
+    borderRadius: 20,
+    padding: 16,
+    gap: 12,
+    borderWidth: 1,
+    borderColor: "#d8e2d2",
+  },
+  quorumCardRow: {
+    flexDirection: "row",
+    alignItems: "baseline",
+    gap: 4,
+  },
+  quorumCount: {
+    color: Colors.text,
+    fontSize: 32,
+    fontWeight: "900",
+  },
+  quorumMax: {
+    color: Colors.textMuted,
+    fontSize: 18,
+    fontWeight: "700",
+  },
+  quorumLabel: {
+    color: Colors.textMuted,
+    fontSize: 14,
+    flex: 1,
+    textAlign: "right",
+  },
+  progressTrack: {
+    height: 8,
+    backgroundColor: "#e4ecde",
+    borderRadius: 4,
+    overflow: "hidden",
+  },
+  progressBar: {
+    height: "100%",
+    borderRadius: 4,
+  },
+  progressBarOk: {
+    backgroundColor: Colors.tint,
+  },
+  progressBarPending: {
+    backgroundColor: "#f5a623",
+  },
+  quorumPillRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 6,
+  },
+  quorumPill: {
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderWidth: 1,
+  },
+  quorumPillOk: {
+    backgroundColor: "#edf4e7",
+    borderColor: "#bad8c0",
+  },
+  quorumPillPending: {
+    backgroundColor: "#fff8e6",
+    borderColor: "#ffe0a0",
+  },
+  quorumPillRemoved: {
+    backgroundColor: "#f3f4f6",
+    borderColor: "#d1d5db",
+  },
+  quorumPillText: {
+    fontSize: 13,
+    fontWeight: "700",
+  },
+  quorumPillTextOk: {
+    color: "#1f6e3f",
+  },
+  quorumPillTextPending: {
+    color: "#7a5200",
+  },
+  quorumPillTextRemoved: {
+    color: "#6b7280",
+  },
+  // Colunas de rascunho (lista semanal)
+  draftColumns: {
+    flexDirection: "row",
+    gap: 10,
+  },
+  draftColumn: {
+    flex: 1,
+    gap: 8,
+  },
+  columnTitle: {
+    color: Colors.text,
+    fontSize: 13,
+    fontWeight: "800",
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
+    marginBottom: 2,
+  },
+  playerRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    backgroundColor: "#ffffff",
+    borderRadius: 12,
+    padding: 10,
+    borderWidth: 1,
+    borderColor: "#e2eadb",
+  },
+  playerName: {
+    flex: 1,
+    color: Colors.text,
+    fontSize: 14,
+    fontWeight: "700",
+  },
+  playerMeta: {
+    color: Colors.textMuted,
+    fontSize: 12,
+  },
+  inlineDanger: {
+    padding: 4,
+  },
+  inlineDangerText: {
+    color: "#b91c1c",
+    fontSize: 18,
+    lineHeight: 20,
+  },
+  inlineAction: {
+    padding: 4,
+  },
+  inlineActionText: {
+    color: Colors.tint,
+    fontSize: 18,
+    lineHeight: 20,
+  },
+  // Seção genérica dentro de tab
+  sectionLabel: {
+    color: Colors.text,
+    fontSize: 16,
+    fontWeight: "800",
+    marginBottom: 4,
+  },
+  emptyText: {
+    color: Colors.textMuted,
+    fontSize: 14,
+    lineHeight: 21,
+  },
+  addButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    backgroundColor: "#edf4e7",
+    borderRadius: 14,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderWidth: 1,
+    borderColor: "#bad8c0",
+    borderStyle: "dashed",
+  },
+  addButtonText: {
+    color: Colors.tint,
+    fontSize: 15,
+    fontWeight: "800",
+  },
+  sectionStack: {
+    gap: 10,
+  },
+  emptyState: {
+    alignItems: "center",
+    gap: 8,
+    paddingVertical: 32,
+  },
+  emptyStateEmoji: {
+    fontSize: 36,
+  },
+  emptyStateTitle: {
+    color: Colors.text,
+    fontSize: 16,
+    fontWeight: "800",
+  },
+  emptyStateText: {
+    color: Colors.textMuted,
+    fontSize: 14,
+    textAlign: "center",
+    lineHeight: 21,
+  },
+  // Poll card
+  pollCard: {
+    backgroundColor: "#ffffff",
+    borderRadius: 20,
+    padding: 16,
+    gap: 10,
+    borderWidth: 1,
+    borderColor: "#d8e2d2",
+  },
+  pollTitle: {
+    color: Colors.text,
+    fontSize: 16,
+    fontWeight: "800",
+  },
+  pollMeta: {
+    color: Colors.textMuted,
+    fontSize: 13,
+  },
+  pollEntry: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    backgroundColor: "#f4f6ef",
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  pollEntryLabel: {
+    flex: 1,
+    color: Colors.text,
+    fontSize: 14,
+    fontWeight: "600",
+  },
+  pollEntryVotes: {
+    color: Colors.tint,
+    fontSize: 14,
+    fontWeight: "800",
+  },
 });
