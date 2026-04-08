@@ -31,6 +31,7 @@ import {
   listAllSportsAccounts,
   listEventPollBallots,
   listModalityPositions,
+  listTacticalFormations,
   removePlayerFromWeeklyEvent,
   updateEventMatch,
   upsertEventPollVote,
@@ -51,7 +52,10 @@ import type {
   PollTemplate,
   SportsAccount,
   EventPollVote,
+  TacticalFormation,
+  TacticalFormationSlot,
 } from "@/src/types/domain";
+import TacticalField, { type SlotAssignment } from "@/src/components/tactical-field";
 
 const roleLabels: Record<AccountRole, string> = {
   group_admin: "Admin do grupo",
@@ -689,6 +693,16 @@ export default function EventsScreen() {
   const [matchAssignedPositionIds, setMatchAssignedPositionIds] = useState<Record<string, string | null>>({});
   const [matchFormationCounts, setMatchFormationCounts] = useState<Record<string, string>>({});
 
+  // ── Formações táticas ───────────────────────────────────────────────────────
+  const [tacticalFormations, setTacticalFormations] = useState<TacticalFormation[]>([]);
+  const [homeFormationId, setHomeFormationId] = useState<string | null>(null);
+  const [awayFormationId, setAwayFormationId] = useState<string | null>(null);
+  // Slot assignments: slotId → { playerId, playerName }
+  const [homeSlotAssignments, setHomeSlotAssignments] = useState<SlotAssignment[]>([]);
+  const [awaySlotAssignments, setAwaySlotAssignments] = useState<SlotAssignment[]>([]);
+  // Jogador aguardando alocação no campo
+  const [pendingSlotPlayer, setPendingSlotPlayer] = useState<{ id: string; name: string; team: "home" | "away" } | null>(null);
+
   useEffect(() => {
     let isActive = true;
 
@@ -824,7 +838,7 @@ export default function EventsScreen() {
 
     try {
       const nextOverview = await getAccountOverview(selectedAccess.account.id);
-      const [nextTimeline, nextPlayers, nextTemplates, nextPositions] = await Promise.all([
+      const [nextTimeline, nextPlayers, nextTemplates, nextPositions, nextFormations] = await Promise.all([
         listAccountEventTimeline(selectedAccess.account.id, nextOverview.account.modality_id),
         canManageWeeklyList
           ? listAccountPlayers(selectedAccess.account.id, nextOverview.account.modality_id)
@@ -833,6 +847,7 @@ export default function EventsScreen() {
           ? listAccountPollTemplates(selectedAccess.account.id)
           : Promise.resolve([] as PollTemplate[]),
         listModalityPositions(nextOverview.account.modality_id),
+        listTacticalFormations(selectedAccess.account.id),
       ]);
 
       const nextViewerParticipantId = findViewerParticipantId(nextTimeline);
@@ -849,6 +864,7 @@ export default function EventsScreen() {
       setOverview(nextOverview);
       setTimeline(nextTimeline);
       setModalityPositions(nextPositions);
+      setTacticalFormations(nextFormations);
       setAccountPlayers(nextPlayers);
       setAccountPollTemplates(nextTemplates);
       setEventPollBallots(nextBallots);
@@ -1372,6 +1388,12 @@ export default function EventsScreen() {
     setMatchAwayPlayerIds([]);
     setMatchAssignedPositionIds({});
     setMatchFormationCounts(buildDefaultMatchFormationCounts(modalityPositions, overview?.modality.players_per_team ?? 0));
+    const defaultFormation = tacticalFormations.find((f) => f.is_default) ?? tacticalFormations[0] ?? null;
+    setHomeFormationId(defaultFormation?.id ?? null);
+    setAwayFormationId(defaultFormation?.id ?? null);
+    setHomeSlotAssignments([]);
+    setAwaySlotAssignments([]);
+    setPendingSlotPlayer(null);
   }
 
   function openCreateMatchModal() {
@@ -1416,6 +1438,11 @@ export default function EventsScreen() {
         assignedPositionIds,
       ),
     );
+    setHomeFormationId(matchItem.homeTeam?.team.formation_id ?? null);
+    setAwayFormationId(matchItem.awayTeam?.team.formation_id ?? null);
+    setHomeSlotAssignments([]);
+    setAwaySlotAssignments([]);
+    setPendingSlotPlayer(null);
   }
 
   function closeMatchModal() {
@@ -1465,6 +1492,29 @@ export default function EventsScreen() {
 
     setMatchAwayPlayerIds((currentValue) => [...currentValue.filter((id) => id !== playerId), playerId]);
     setMatchHomePlayerIds((currentValue) => currentValue.filter((id) => id !== playerId));
+  }
+
+  function handleTacticalSlotPress(slot: TacticalFormationSlot, team: "home" | "away") {
+    if (!pendingSlotPlayer || pendingSlotPlayer.team !== team) return;
+
+    const setAssignments = team === "home" ? setHomeSlotAssignments : setAwaySlotAssignments;
+    setAssignments((prev) => {
+      const withoutSlot = prev.filter((a) => a.slotId !== slot.id);
+      const withoutPlayer = withoutSlot.filter((a) => a.playerId !== pendingSlotPlayer.id);
+      return [
+        ...withoutPlayer,
+        { slotId: slot.id, playerId: pendingSlotPlayer.id, playerName: pendingSlotPlayer.name },
+      ];
+    });
+    setPendingSlotPlayer(null);
+  }
+
+  function selectPendingSlotPlayer(playerId: string, playerName: string, team: "home" | "away") {
+    if (pendingSlotPlayer?.id === playerId && pendingSlotPlayer.team === team) {
+      setPendingSlotPlayer(null);
+    } else {
+      setPendingSlotPlayer({ id: playerId, name: playerName, team });
+    }
   }
 
   function copyExistingTeamToMatchDraft(side: "home" | "away", sourceTeamId: string) {
@@ -1656,6 +1706,8 @@ export default function EventsScreen() {
           awayTeamName: matchAwayTeamNameDraft.trim() || "Time B",
           homeScore,
           awayScore,
+          homeFormationId,
+          awayFormationId,
           homePlayers: buildLineupInput(matchHomePlayerIds, matchAssignedPositionIds),
           awayPlayers: buildLineupInput(matchAwayPlayerIds, matchAssignedPositionIds),
         });
@@ -1666,6 +1718,8 @@ export default function EventsScreen() {
           createdBy: profile.id,
           homeTeamName: matchHomeTeamNameDraft.trim() || "Time A",
           awayTeamName: matchAwayTeamNameDraft.trim() || "Time B",
+          homeFormationId,
+          awayFormationId,
           homePlayers: buildLineupInput(matchHomePlayerIds, matchAssignedPositionIds),
           awayPlayers: buildLineupInput(matchAwayPlayerIds, matchAssignedPositionIds),
         });
@@ -2726,6 +2780,8 @@ export default function EventsScreen() {
     ).length;
     const homeTeamRating = calculateTeamRating(matchHomePlayerIds, activeParticipants);
     const awayTeamRating = calculateTeamRating(matchAwayPlayerIds, activeParticipants);
+    const homeFormation = tacticalFormations.find((f) => f.id === homeFormationId) ?? null;
+    const awayFormation = tacticalFormations.find((f) => f.id === awayFormationId) ?? null;
 
     return (
       <Modal animationType="fade" visible transparent onRequestClose={closeMatchModal}>
@@ -2959,14 +3015,32 @@ export default function EventsScreen() {
                 </View>
 
                 <View style={styles.formSection}>
-                  <Text style={styles.formSectionTitle}>Time A</Text>
-                  <Text style={styles.fieldHint}>
-                    Monte o time com base apenas nos jogadores selecionados para essa partida.
-                  </Text>
+                  <View style={styles.formSectionHeader}>
+                    <Text style={styles.formSectionTitle}>Time A</Text>
+                    {matchHomePlayerIds.length > 0 && (
+                      <Text style={styles.formSectionBadge}>{matchHomePlayerIds.length} jog. · {homeTeamRating.toFixed(1)}</Text>
+                    )}
+                  </View>
                   <TextInput value={matchHomeTeamNameDraft} onChangeText={setMatchHomeTeamNameDraft} style={styles.input} />
-                  <Text style={styles.selectionSummary}>
-                    {matchHomePlayerIds.length} jogador(es) | Nota total {homeTeamRating.toFixed(2)}
-                  </Text>
+
+                  {tacticalFormations.length > 0 && (
+                    <>
+                      <Text style={styles.label}>Formacao tatica</Text>
+                      <View style={styles.chips}>
+                        {tacticalFormations.map((formation) => (
+                          <Pressable
+                            key={`home-formation-${formation.id}`}
+                            onPress={() => setHomeFormationId(formation.id)}
+                            style={[styles.chip, homeFormationId === formation.id && styles.chipSelected]}>
+                            <Text style={[styles.chipText, homeFormationId === formation.id && styles.chipTextSelected]}>
+                              {formation.name}
+                            </Text>
+                          </Pressable>
+                        ))}
+                      </View>
+                    </>
+                  )}
+
                   {sourceTeams.length > 0 ? (
                     <View style={styles.chips}>
                       {sourceTeams.map((team) => (
@@ -2976,36 +3050,73 @@ export default function EventsScreen() {
                       ))}
                     </View>
                   ) : null}
+
                   {selectedParticipants.length > 0 ? (
                     <View style={styles.chips}>
                       {selectedParticipants.map((item) => {
-                      const isSelected = matchHomePlayerIds.includes(item.player.id);
-                      return (
-                        <Pressable key={`home-${item.player.id}`} onPress={() => toggleMatchPlayer("home", item.player.id)} style={[styles.chip, isSelected && styles.chipSelected]}>
-                          <Text style={[styles.chipText, isSelected && styles.chipTextSelected]}>
-                            {item.player.full_name}
-                            {matchAssignedPositionIds[item.player.id]
-                              ? ` · ${positionNameById.get(matchAssignedPositionIds[item.player.id] ?? "") ?? ""}`
-                              : ""}
-                          </Text>
-                        </Pressable>
-                      );
+                        const isInTeam = matchHomePlayerIds.includes(item.player.id);
+                        const isPending = pendingSlotPlayer?.id === item.player.id && pendingSlotPlayer.team === "home";
+                        return (
+                          <Pressable
+                            key={`home-${item.player.id}`}
+                            onPress={() => {
+                              if (isInTeam) {
+                                selectPendingSlotPlayer(item.player.id, item.player.full_name, "home");
+                              } else {
+                                toggleMatchPlayer("home", item.player.id);
+                              }
+                            }}
+                            style={[styles.chip, isInTeam && styles.chipSelected, isPending && styles.chipPending]}>
+                            <Text style={[styles.chipText, isInTeam && styles.chipTextSelected]}>
+                              {item.player.full_name.split(" ")[0]}
+                              {isPending ? " 👆" : ""}
+                            </Text>
+                          </Pressable>
+                        );
                       })}
                     </View>
                   ) : (
                     <Text style={styles.panelText}>Selecione antes os jogadores que vao entrar nessa partida.</Text>
                   )}
+
+                  {homeFormation && matchHomePlayerIds.length > 0 && (
+                    <TacticalField
+                      formation={homeFormation}
+                      assignments={homeSlotAssignments}
+                      pendingPlayerId={pendingSlotPlayer?.team === "home" ? pendingSlotPlayer.id : null}
+                      pendingPlayerName={pendingSlotPlayer?.team === "home" ? pendingSlotPlayer.name : null}
+                      onSlotPress={(slot) => handleTacticalSlotPress(slot, "home")}
+                    />
+                  )}
                 </View>
 
                 <View style={styles.formSection}>
-                  <Text style={styles.formSectionTitle}>Time B</Text>
-                  <Text style={styles.fieldHint}>
-                    Ajuste o segundo time depois de marcar quem participa e, se quiser, usar o balanceamento automatico.
-                  </Text>
+                  <View style={styles.formSectionHeader}>
+                    <Text style={styles.formSectionTitle}>Time B</Text>
+                    {matchAwayPlayerIds.length > 0 && (
+                      <Text style={styles.formSectionBadge}>{matchAwayPlayerIds.length} jog. · {awayTeamRating.toFixed(1)}</Text>
+                    )}
+                  </View>
                   <TextInput value={matchAwayTeamNameDraft} onChangeText={setMatchAwayTeamNameDraft} style={styles.input} />
-                  <Text style={styles.selectionSummary}>
-                    {matchAwayPlayerIds.length} jogador(es) | Nota total {awayTeamRating.toFixed(2)}
-                  </Text>
+
+                  {tacticalFormations.length > 0 && (
+                    <>
+                      <Text style={styles.label}>Formacao tatica</Text>
+                      <View style={styles.chips}>
+                        {tacticalFormations.map((formation) => (
+                          <Pressable
+                            key={`away-formation-${formation.id}`}
+                            onPress={() => setAwayFormationId(formation.id)}
+                            style={[styles.chip, awayFormationId === formation.id && styles.chipSelected]}>
+                            <Text style={[styles.chipText, awayFormationId === formation.id && styles.chipTextSelected]}>
+                              {formation.name}
+                            </Text>
+                          </Pressable>
+                        ))}
+                      </View>
+                    </>
+                  )}
+
                   {sourceTeams.length > 0 ? (
                     <View style={styles.chips}>
                       {sourceTeams.map((team) => (
@@ -3015,24 +3126,43 @@ export default function EventsScreen() {
                       ))}
                     </View>
                   ) : null}
+
                   {selectedParticipants.length > 0 ? (
                     <View style={styles.chips}>
                       {selectedParticipants.map((item) => {
-                      const isSelected = matchAwayPlayerIds.includes(item.player.id);
-                      return (
-                        <Pressable key={`away-${item.player.id}`} onPress={() => toggleMatchPlayer("away", item.player.id)} style={[styles.chip, isSelected && styles.chipSelected]}>
-                          <Text style={[styles.chipText, isSelected && styles.chipTextSelected]}>
-                            {item.player.full_name}
-                            {matchAssignedPositionIds[item.player.id]
-                              ? ` · ${positionNameById.get(matchAssignedPositionIds[item.player.id] ?? "") ?? ""}`
-                              : ""}
-                          </Text>
-                        </Pressable>
-                      );
+                        const isInTeam = matchAwayPlayerIds.includes(item.player.id);
+                        const isPending = pendingSlotPlayer?.id === item.player.id && pendingSlotPlayer.team === "away";
+                        return (
+                          <Pressable
+                            key={`away-${item.player.id}`}
+                            onPress={() => {
+                              if (isInTeam) {
+                                selectPendingSlotPlayer(item.player.id, item.player.full_name, "away");
+                              } else {
+                                toggleMatchPlayer("away", item.player.id);
+                              }
+                            }}
+                            style={[styles.chip, isInTeam && styles.chipSelected, isPending && styles.chipPending]}>
+                            <Text style={[styles.chipText, isInTeam && styles.chipTextSelected]}>
+                              {item.player.full_name.split(" ")[0]}
+                              {isPending ? " 👆" : ""}
+                            </Text>
+                          </Pressable>
+                        );
                       })}
                     </View>
                   ) : (
                     <Text style={styles.panelText}>Selecione antes os jogadores que vao entrar nessa partida.</Text>
+                  )}
+
+                  {awayFormation && matchAwayPlayerIds.length > 0 && (
+                    <TacticalField
+                      formation={awayFormation}
+                      assignments={awaySlotAssignments}
+                      pendingPlayerId={pendingSlotPlayer?.team === "away" ? pendingSlotPlayer.id : null}
+                      pendingPlayerName={pendingSlotPlayer?.team === "away" ? pendingSlotPlayer.name : null}
+                      onSlotPress={(slot) => handleTacticalSlotPress(slot, "away")}
+                    />
                   )}
                 </View>
 
@@ -3231,6 +3361,7 @@ const styles = StyleSheet.create({
   chips: { flexDirection: "row", flexWrap: "wrap", gap: 10 },
   chip: { backgroundColor: "#edf4e7", borderRadius: 999, paddingHorizontal: 14, paddingVertical: 10 },
   chipSelected: { backgroundColor: Colors.tint },
+  chipPending: { backgroundColor: "#f5a623", borderWidth: 2, borderColor: "#ffe0a0" },
   chipText: { color: Colors.tint, fontSize: 14, fontWeight: "700" },
   chipTextSelected: { color: "#ffffff" },
   innerCard: { backgroundColor: "#f8faf5", borderRadius: 18, padding: 14, gap: 10, borderWidth: 1, borderColor: "#dfe7d8" },

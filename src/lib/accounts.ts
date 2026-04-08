@@ -20,6 +20,8 @@ import type {
   Profile,
   SportModality,
   SportsAccount,
+  TacticalFormation,
+  TacticalFormationSlot,
 } from "@/src/types/domain";
 
 export type AccountOverview = {
@@ -136,6 +138,8 @@ export type CreateEventMatchInput = {
   createdBy: string;
   homeTeamName: string;
   awayTeamName: string;
+  homeFormationId?: string | null;
+  awayFormationId?: string | null;
   homePlayers: EventMatchLineupInput[];
   awayPlayers: EventMatchLineupInput[];
 };
@@ -149,6 +153,8 @@ export type UpdateEventMatchInput = {
   awayTeamName: string;
   homeScore: number;
   awayScore: number;
+  homeFormationId?: string | null;
+  awayFormationId?: string | null;
   homePlayers: EventMatchLineupInput[];
   awayPlayers: EventMatchLineupInput[];
 };
@@ -332,7 +338,7 @@ const eventMatchSelectFields =
   "id, event_id, title, status, sort_order, starts_at, completed_at, created_by, created_at, updated_at";
 
 const eventMatchTeamSelectFields =
-  "id, match_id, side, name, score, source_team_id, created_at, updated_at";
+  "id, match_id, side, name, score, formation_id, source_team_id, created_at, updated_at";
 
 const eventMatchTeamPlayerSelectFields =
   "id, team_id, account_player_id, modality_position_id, sort_order, created_at";
@@ -645,6 +651,39 @@ export async function listModalityPositions(modalityId: string): Promise<Modalit
 
   throwIfError(error);
   return (data ?? []) as ModalityPosition[];
+}
+
+export async function listTacticalFormations(accountId: string): Promise<TacticalFormation[]> {
+  const { data: formations, error: formationsError } = await supabase
+    .from("tactical_formations")
+    .select("id, account_id, name, description, is_default, sort_order, created_at, updated_at")
+    .eq("account_id", accountId)
+    .order("sort_order", { ascending: true });
+
+  throwIfError(formationsError);
+
+  if (!formations || formations.length === 0) return [];
+
+  const formationIds = formations.map((f) => f.id);
+  const { data: slots, error: slotsError } = await supabase
+    .from("tactical_formation_slots")
+    .select("id, formation_id, modality_position_id, slot_label, position_x, position_y, sort_order")
+    .in("formation_id", formationIds)
+    .order("sort_order", { ascending: true });
+
+  throwIfError(slotsError);
+
+  const slotsByFormation = new Map<string, TacticalFormationSlot[]>();
+  for (const slot of slots ?? []) {
+    const list = slotsByFormation.get(slot.formation_id) ?? [];
+    list.push(slot as TacticalFormationSlot);
+    slotsByFormation.set(slot.formation_id, list);
+  }
+
+  return formations.map((f) => ({
+    ...(f as Omit<TacticalFormation, "slots">),
+    slots: slotsByFormation.get(f.id) ?? [],
+  }));
 }
 
 export async function listAccountRoster(
@@ -2153,12 +2192,14 @@ export async function createEventMatch(input: CreateEventMatchInput) {
         side: "home",
         name: input.homeTeamName.trim() || "Time A",
         score: 0,
+        formation_id: input.homeFormationId ?? null,
       },
       {
         match_id: match.id,
         side: "away",
         name: input.awayTeamName.trim() || "Time B",
         score: 0,
+        formation_id: input.awayFormationId ?? null,
       },
     ])
     .select(eventMatchTeamSelectFields);
@@ -2202,6 +2243,7 @@ export async function updateEventMatch(input: UpdateEventMatchInput) {
           side: "home",
           name: input.homeTeamName.trim() || "Time A",
           score: input.homeScore,
+          formation_id: input.homeFormationId ?? null,
         },
         {
           id: input.awayTeamId,
@@ -2209,6 +2251,7 @@ export async function updateEventMatch(input: UpdateEventMatchInput) {
           side: "away",
           name: input.awayTeamName.trim() || "Time B",
           score: input.awayScore,
+          formation_id: input.awayFormationId ?? null,
         },
       ],
       { onConflict: "id" },

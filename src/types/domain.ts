@@ -43,6 +43,28 @@ export type ModalityPosition = {
   updated_at: string;
 };
 
+export type TacticalFormationSlot = {
+  id: string;
+  formation_id: string;
+  modality_position_id: string | null;
+  slot_label: string;
+  position_x: number; // 0–100 (% da largura do campo, esquerda→direita)
+  position_y: number; // 0–100 (% da altura do campo, 0=goleiro, 100=ataque)
+  sort_order: number;
+};
+
+export type TacticalFormation = {
+  id: string;
+  account_id: string;
+  name: string;
+  description: string | null;
+  is_default: boolean;
+  sort_order: number;
+  slots: TacticalFormationSlot[];
+  created_at: string;
+  updated_at: string;
+};
+
 export type SportsAccount = {
   id: string;
   name: string;
@@ -263,6 +285,7 @@ export type EventMatchTeam = {
   side: EventMatchTeamSide;
   name: string;
   score: number;
+  formation_id: string | null;
   source_team_id: string | null;
   created_at: string;
   updated_at: string;
