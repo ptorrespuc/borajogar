@@ -1511,6 +1511,19 @@ export default function EventsScreen() {
   function assignPlayerToPendingSlot(playerId: string, playerName: string, team: "home" | "away") {
     if (!pendingSlot || pendingSlot.team !== team) return;
 
+    // Garante que o jogador está no time correto (e remove do outro se necessário)
+    if (team === "home") {
+      setMatchHomePlayerIds((prev) => prev.includes(playerId) ? prev : [...prev, playerId]);
+      setMatchAwayPlayerIds((prev) => prev.filter((id) => id !== playerId));
+      // Remove assignment do time adversário se havia
+      setAwaySlotAssignments((prev) => prev.filter((a) => a.playerId !== playerId));
+    } else {
+      setMatchAwayPlayerIds((prev) => prev.includes(playerId) ? prev : [...prev, playerId]);
+      setMatchHomePlayerIds((prev) => prev.filter((id) => id !== playerId));
+      // Remove assignment do time adversário se havia
+      setHomeSlotAssignments((prev) => prev.filter((a) => a.playerId !== playerId));
+    }
+
     const setAssignments = team === "home" ? setHomeSlotAssignments : setAwaySlotAssignments;
     setAssignments((prev) => {
       const withoutSlot = prev.filter((a) => a.slotId !== pendingSlot.slotId);
@@ -2900,6 +2913,9 @@ export default function EventsScreen() {
                           setMatchHomePlayerIds([]);
                           setMatchAwayPlayerIds([]);
                           setMatchAssignedPositionIds({});
+                          setHomeSlotAssignments([]);
+                          setAwaySlotAssignments([]);
+                          setPendingSlot(null);
                         }}
                         style={styles.secondaryButton}>
                         <Text style={styles.secondaryButtonText}>Limpar</Text>
@@ -2999,7 +3015,8 @@ export default function EventsScreen() {
                           <Pressable
                             key={`home-${item.player.id}`}
                             onPress={() => {
-                              if (slotPendingForHome && isInTeam) {
+                              if (slotPendingForHome) {
+                                // Qualquer jogador selecionado pode ser atribuído — entra no time automaticamente
                                 assignPlayerToPendingSlot(item.player.id, item.player.full_name, "home");
                               }
                               // sem slot pendente: nada acontece
@@ -3007,7 +3024,7 @@ export default function EventsScreen() {
                             style={[
                               styles.chip,
                               isInTeam && styles.chipSelected,
-                              slotPendingForHome && isInTeam && styles.chipPending,
+                              slotPendingForHome && styles.chipPending,
                             ]}>
                             <Text style={[styles.chipText, isInTeam && styles.chipTextSelected]}>
                               {item.player.full_name.split(" ")[0]}
@@ -3071,7 +3088,8 @@ export default function EventsScreen() {
                           <Pressable
                             key={`away-${item.player.id}`}
                             onPress={() => {
-                              if (slotPendingForAway && isInTeam) {
+                              if (slotPendingForAway) {
+                                // Qualquer jogador selecionado pode ser atribuído — entra no time automaticamente
                                 assignPlayerToPendingSlot(item.player.id, item.player.full_name, "away");
                               }
                               // sem slot pendente: nada acontece
@@ -3079,7 +3097,7 @@ export default function EventsScreen() {
                             style={[
                               styles.chip,
                               isInTeam && styles.chipSelected,
-                              slotPendingForAway && isInTeam && styles.chipPending,
+                              slotPendingForAway && styles.chipPending,
                             ]}>
                             <Text style={[styles.chipText, isInTeam && styles.chipTextSelected]}>
                               {item.player.full_name.split(" ")[0]}
