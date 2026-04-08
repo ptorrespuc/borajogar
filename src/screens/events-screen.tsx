@@ -700,8 +700,8 @@ export default function EventsScreen() {
   // Slot assignments: slotId → { playerId, playerName }
   const [homeSlotAssignments, setHomeSlotAssignments] = useState<SlotAssignment[]>([]);
   const [awaySlotAssignments, setAwaySlotAssignments] = useState<SlotAssignment[]>([]);
-  // Jogador aguardando alocação no campo
-  const [pendingSlotPlayer, setPendingSlotPlayer] = useState<{ id: string; name: string; team: "home" | "away" } | null>(null);
+  // Slot aguardando um jogador (nova interação: clique no slot primeiro, depois no jogador)
+  const [pendingSlot, setPendingSlot] = useState<{ slotId: string; team: "home" | "away" } | null>(null);
 
   useEffect(() => {
     let isActive = true;
@@ -1393,7 +1393,7 @@ export default function EventsScreen() {
     setAwayFormationId(defaultFormation?.id ?? null);
     setHomeSlotAssignments([]);
     setAwaySlotAssignments([]);
-    setPendingSlotPlayer(null);
+    setPendingSlot(null);
   }
 
   function openCreateMatchModal() {
@@ -1442,7 +1442,7 @@ export default function EventsScreen() {
     setAwayFormationId(matchItem.awayTeam?.team.formation_id ?? null);
     setHomeSlotAssignments([]);
     setAwaySlotAssignments([]);
-    setPendingSlotPlayer(null);
+    setPendingSlot(null);
   }
 
   function closeMatchModal() {
@@ -1464,6 +1464,11 @@ export default function EventsScreen() {
         return nextValue;
       });
       return;
+    }
+
+    const maxPlayers = (overview?.modality.players_per_team ?? 0) * 2;
+    if (maxPlayers > 0 && matchSelectedPlayerIds.length >= maxPlayers) {
+      return; // limite atingido
     }
 
     setMatchSelectedPlayerIds((currentValue) => [...currentValue, playerId]);
@@ -1495,26 +1500,27 @@ export default function EventsScreen() {
   }
 
   function handleTacticalSlotPress(slot: TacticalFormationSlot, team: "home" | "away") {
-    if (!pendingSlotPlayer || pendingSlotPlayer.team !== team) return;
+    // Toggle: clicar no mesmo slot deseleciona; clicar em outro seleciona
+    if (pendingSlot?.slotId === slot.id && pendingSlot.team === team) {
+      setPendingSlot(null);
+    } else {
+      setPendingSlot({ slotId: slot.id, team });
+    }
+  }
+
+  function assignPlayerToPendingSlot(playerId: string, playerName: string, team: "home" | "away") {
+    if (!pendingSlot || pendingSlot.team !== team) return;
 
     const setAssignments = team === "home" ? setHomeSlotAssignments : setAwaySlotAssignments;
     setAssignments((prev) => {
-      const withoutSlot = prev.filter((a) => a.slotId !== slot.id);
-      const withoutPlayer = withoutSlot.filter((a) => a.playerId !== pendingSlotPlayer.id);
+      const withoutSlot = prev.filter((a) => a.slotId !== pendingSlot.slotId);
+      const withoutPlayer = withoutSlot.filter((a) => a.playerId !== playerId);
       return [
         ...withoutPlayer,
-        { slotId: slot.id, playerId: pendingSlotPlayer.id, playerName: pendingSlotPlayer.name },
+        { slotId: pendingSlot.slotId, playerId, playerName },
       ];
     });
-    setPendingSlotPlayer(null);
-  }
-
-  function selectPendingSlotPlayer(playerId: string, playerName: string, team: "home" | "away") {
-    if (pendingSlotPlayer?.id === playerId && pendingSlotPlayer.team === team) {
-      setPendingSlotPlayer(null);
-    } else {
-      setPendingSlotPlayer({ id: playerId, name: playerName, team });
-    }
+    setPendingSlot(null);
   }
 
   function copyExistingTeamToMatchDraft(side: "home" | "away", sourceTeamId: string) {
@@ -2782,6 +2788,8 @@ export default function EventsScreen() {
     const awayTeamRating = calculateTeamRating(matchAwayPlayerIds, activeParticipants);
     const homeFormation = tacticalFormations.find((f) => f.id === homeFormationId) ?? null;
     const awayFormation = tacticalFormations.find((f) => f.id === awayFormationId) ?? null;
+    const maxPlayersForMatch = (overview?.modality.players_per_team ?? 0) * 2;
+    const isPlayerLimitReached = maxPlayersForMatch > 0 && matchSelectedPlayerIds.length >= maxPlayersForMatch;
 
     return (
       <Modal animationType="fade" visible transparent onRequestClose={closeMatchModal}>
@@ -2829,7 +2837,7 @@ export default function EventsScreen() {
                   </View>
                 )}
 
-                {matchModal.mode === "create" && latestPreviousMatchTeams.length > 0 ? (
+                {matchModal.mode === "create" && latestPreviousMatch ? (
                   <View style={styles.formSection}>
                     <View style={styles.formSectionHeader}>
                       <Text style={styles.formSectionTitle}>Repetir da partida anterior</Text>
@@ -2837,103 +2845,34 @@ export default function EventsScreen() {
                         <Text style={styles.formSectionBadge}>{latestPreviousWinner.team.name} venceu</Text>
                       )}
                     </View>
-
-                    {latestPreviousWinner ? (
-                      <View style={styles.listActions}>
+                    <View style={styles.listActions}>
+                      {latestPreviousMatch.homeTeam ? (
                         <Pressable
-                          onPress={() => copyExistingTeamToMatchDraft("home", latestPreviousWinner.team.id)}
+                          onPress={() => copyExistingTeamToMatchDraft("home", latestPreviousMatch.homeTeam!.team.id)}
                           style={styles.secondaryButton}>
-                          <Text style={styles.secondaryButtonText}>{latestPreviousWinner.team.name} no Time A</Text>
+                          <Text style={styles.secondaryButtonText}>Repetir Time A</Text>
                         </Pressable>
+                      ) : null}
+                      {latestPreviousMatch.awayTeam ? (
                         <Pressable
-                          onPress={() => copyExistingTeamToMatchDraft("away", latestPreviousWinner.team.id)}
+                          onPress={() => copyExistingTeamToMatchDraft("away", latestPreviousMatch.awayTeam!.team.id)}
                           style={styles.secondaryButton}>
-                          <Text style={styles.secondaryButtonText}>{latestPreviousWinner.team.name} no Time B</Text>
+                          <Text style={styles.secondaryButtonText}>Repetir Time B</Text>
                         </Pressable>
-                      </View>
-                    ) : null}
-
-                    <Text style={styles.label}>Copiar para o Time A</Text>
-                    <View style={styles.chips}>
-                      {latestPreviousMatchTeams.map((team) => (
-                        <Pressable
-                          key={`previous-home-${team.id}`}
-                          onPress={() => copyExistingTeamToMatchDraft("home", team.id)}
-                          style={styles.chip}>
-                          <Text style={styles.chipText}>{team.label}</Text>
-                        </Pressable>
-                      ))}
-                    </View>
-
-                    <Text style={styles.label}>Copiar para o Time B</Text>
-                    <View style={styles.chips}>
-                      {latestPreviousMatchTeams.map((team) => (
-                        <Pressable
-                          key={`previous-away-${team.id}`}
-                          onPress={() => copyExistingTeamToMatchDraft("away", team.id)}
-                          style={styles.chip}>
-                          <Text style={styles.chipText}>{team.label}</Text>
-                        </Pressable>
-                      ))}
+                      ) : null}
                     </View>
                   </View>
                 ) : null}
 
-                <View style={styles.formSection}>
-                  <View style={styles.formSectionHeader}>
-                    <Text style={styles.formSectionTitle}>Formacao</Text>
-                    {playersPerTeamTarget > 0 && (
-                      <Text style={styles.formSectionBadge}>{playersPerTeamTarget} por time · {requiredSelectedCount} no total</Text>
-                    )}
-                  </View>
-
-                  {modalityPositions.length > 0 ? (
-                    <>
-                      <Text style={styles.positionGridLabel}>Jogadores por time</Text>
-                      <View style={styles.positionGrid}>
-                        {modalityPositions.map((position) => (
-                          <View key={position.id} style={styles.positionCountCard}>
-                            <Text style={styles.positionCountTitle}>{position.name}</Text>
-                            <TextInput
-                              value={matchFormationCounts[position.id] ?? "0"}
-                              onChangeText={(value) => updateMatchFormationCount(position.id, value)}
-                              keyboardType="number-pad"
-                              style={styles.positionCountInput}
-                            />
-                          </View>
-                        ))}
-                      </View>
-                    </>
-                  ) : (
-                    <Text style={styles.panelText}>Cadastre as posicoes da modalidade antes de usar a montagem automatica.</Text>
-                  )}
-
-                  {selectedParticipants.length > 0 && !selectedCountMatchesFormation && (
-                    <Text style={styles.fieldHint}>
-                      {`Selecionados: ${selectedParticipants.length}. Necessario: ${requiredSelectedCount}.`}
+                <View style={styles.listActions}>
+                  <Pressable
+                    onPress={handleAutoGenerateMatch}
+                    disabled={!canRunRatingBalance}
+                    style={[styles.secondaryButton, !canRunRatingBalance && styles.buttonDisabled]}>
+                    <Text style={styles.secondaryButtonText}>
+                      {selectedFormation.length > 0 ? "Montar 2 times" : "Balancear por nota"}
                     </Text>
-                  )}
-
-                  <View style={styles.listActions}>
-                    <Pressable
-                      onPress={() =>
-                        setMatchFormationCounts(
-                          buildDefaultMatchFormationCounts(
-                            modalityPositions,
-                            overview?.modality.players_per_team ?? 0,
-                          ),
-                        )
-                      }
-                      style={styles.secondaryButton}>
-                      <Text style={styles.secondaryButtonText}>Usar formacao padrao</Text>
-                    </Pressable>
-                    <Pressable
-                      onPress={handleAutoGenerateMatch}
-                      disabled={!selectedCountMatchesFormation}
-                      style={[styles.secondaryButton, !selectedCountMatchesFormation && styles.buttonDisabled]}>
-                      <Text style={styles.secondaryButtonText}>Montar 2 times</Text>
-                    </Pressable>
-                  </View>
+                  </Pressable>
                 </View>
 
                 <View style={styles.formSection}>
@@ -2979,9 +2918,15 @@ export default function EventsScreen() {
                     <Text style={styles.fieldHint}>{unassignedSelectedCount} selecionado(s) sem time.</Text>
                   )}
 
+                  {isPlayerLimitReached && (
+                    <Text style={styles.fieldHint}>
+                      {`Limite de ${maxPlayersForMatch} jogadores atingido (${overview?.modality.players_per_team ?? 0} por time).`}
+                    </Text>
+                  )}
                   <View style={styles.selectionList}>
                     {activeParticipants.map((item) => {
                       const isSelected = matchSelectedPlayerIds.includes(item.player.id);
+                      const isDisabledByLimit = !isSelected && isPlayerLimitReached;
                       const assignedPositionId = matchAssignedPositionIds[item.player.id];
                       const assignedPositionLabel = assignedPositionId
                         ? positionNameById.get(assignedPositionId) ?? null
@@ -2996,7 +2941,7 @@ export default function EventsScreen() {
                         <Pressable
                           key={`selected-player-${item.player.id}`}
                           onPress={() => toggleMatchSelectedPlayer(item.player.id)}
-                          style={[styles.playerPickerCard, isSelected && styles.playerPickerCardSelected]}>
+                          style={[styles.playerPickerCard, isSelected && styles.playerPickerCardSelected, isDisabledByLimit && styles.playerPickerCardDisabled]}>
                           <View style={styles.rowWithAvatar}>
                             <PlayerAvatar name={item.player.full_name} photoUrl={item.player.photo_url} size={36} />
                             <View style={styles.flex}>
@@ -3041,35 +2986,28 @@ export default function EventsScreen() {
                     </>
                   )}
 
-                  {sourceTeams.length > 0 ? (
-                    <View style={styles.chips}>
-                      {sourceTeams.map((team) => (
-                        <Pressable key={`home-copy-${team.id}`} onPress={() => copyExistingTeamToMatchDraft("home", team.id)} style={styles.chip}>
-                          <Text style={styles.chipText}>{team.label}</Text>
-                        </Pressable>
-                      ))}
-                    </View>
-                  ) : null}
-
                   {selectedParticipants.length > 0 ? (
                     <View style={styles.chips}>
                       {selectedParticipants.map((item) => {
                         const isInTeam = matchHomePlayerIds.includes(item.player.id);
-                        const isPending = pendingSlotPlayer?.id === item.player.id && pendingSlotPlayer.team === "home";
+                        const slotPendingForHome = pendingSlot?.team === "home";
                         return (
                           <Pressable
                             key={`home-${item.player.id}`}
                             onPress={() => {
-                              if (isInTeam) {
-                                selectPendingSlotPlayer(item.player.id, item.player.full_name, "home");
+                              if (slotPendingForHome && isInTeam) {
+                                assignPlayerToPendingSlot(item.player.id, item.player.full_name, "home");
                               } else {
                                 toggleMatchPlayer("home", item.player.id);
                               }
                             }}
-                            style={[styles.chip, isInTeam && styles.chipSelected, isPending && styles.chipPending]}>
+                            style={[
+                              styles.chip,
+                              isInTeam && styles.chipSelected,
+                              slotPendingForHome && isInTeam && styles.chipPending,
+                            ]}>
                             <Text style={[styles.chipText, isInTeam && styles.chipTextSelected]}>
                               {item.player.full_name.split(" ")[0]}
-                              {isPending ? " 👆" : ""}
                             </Text>
                           </Pressable>
                         );
@@ -3079,12 +3017,11 @@ export default function EventsScreen() {
                     <Text style={styles.panelText}>Selecione antes os jogadores que vao entrar nessa partida.</Text>
                   )}
 
-                  {homeFormation && matchHomePlayerIds.length > 0 && (
+                  {homeFormation && (
                     <TacticalField
                       formation={homeFormation}
                       assignments={homeSlotAssignments}
-                      pendingPlayerId={pendingSlotPlayer?.team === "home" ? pendingSlotPlayer.id : null}
-                      pendingPlayerName={pendingSlotPlayer?.team === "home" ? pendingSlotPlayer.name : null}
+                      selectedSlotId={pendingSlot?.team === "home" ? pendingSlot.slotId : null}
                       onSlotPress={(slot) => handleTacticalSlotPress(slot, "home")}
                     />
                   )}
@@ -3117,35 +3054,28 @@ export default function EventsScreen() {
                     </>
                   )}
 
-                  {sourceTeams.length > 0 ? (
-                    <View style={styles.chips}>
-                      {sourceTeams.map((team) => (
-                        <Pressable key={`away-copy-${team.id}`} onPress={() => copyExistingTeamToMatchDraft("away", team.id)} style={styles.chip}>
-                          <Text style={styles.chipText}>{team.label}</Text>
-                        </Pressable>
-                      ))}
-                    </View>
-                  ) : null}
-
                   {selectedParticipants.length > 0 ? (
                     <View style={styles.chips}>
                       {selectedParticipants.map((item) => {
                         const isInTeam = matchAwayPlayerIds.includes(item.player.id);
-                        const isPending = pendingSlotPlayer?.id === item.player.id && pendingSlotPlayer.team === "away";
+                        const slotPendingForAway = pendingSlot?.team === "away";
                         return (
                           <Pressable
                             key={`away-${item.player.id}`}
                             onPress={() => {
-                              if (isInTeam) {
-                                selectPendingSlotPlayer(item.player.id, item.player.full_name, "away");
+                              if (slotPendingForAway && isInTeam) {
+                                assignPlayerToPendingSlot(item.player.id, item.player.full_name, "away");
                               } else {
                                 toggleMatchPlayer("away", item.player.id);
                               }
                             }}
-                            style={[styles.chip, isInTeam && styles.chipSelected, isPending && styles.chipPending]}>
+                            style={[
+                              styles.chip,
+                              isInTeam && styles.chipSelected,
+                              slotPendingForAway && isInTeam && styles.chipPending,
+                            ]}>
                             <Text style={[styles.chipText, isInTeam && styles.chipTextSelected]}>
                               {item.player.full_name.split(" ")[0]}
-                              {isPending ? " 👆" : ""}
                             </Text>
                           </Pressable>
                         );
@@ -3155,12 +3085,11 @@ export default function EventsScreen() {
                     <Text style={styles.panelText}>Selecione antes os jogadores que vao entrar nessa partida.</Text>
                   )}
 
-                  {awayFormation && matchAwayPlayerIds.length > 0 && (
+                  {awayFormation && (
                     <TacticalField
                       formation={awayFormation}
                       assignments={awaySlotAssignments}
-                      pendingPlayerId={pendingSlotPlayer?.team === "away" ? pendingSlotPlayer.id : null}
-                      pendingPlayerName={pendingSlotPlayer?.team === "away" ? pendingSlotPlayer.name : null}
+                      selectedSlotId={pendingSlot?.team === "away" ? pendingSlot.slotId : null}
                       onSlotPress={(slot) => handleTacticalSlotPress(slot, "away")}
                     />
                   )}
@@ -3418,6 +3347,7 @@ const styles = StyleSheet.create({
   selectionList: { gap: 10 },
   playerPickerCard: { borderRadius: 18, borderWidth: 1, borderColor: "#dfe7d8", backgroundColor: "#f8faf5", padding: 14 },
   playerPickerCardSelected: { borderColor: Colors.tint, backgroundColor: "#e8f4ea" },
+  playerPickerCardDisabled: { opacity: 0.38 },
   playerPickerTitle: { color: Colors.text, fontSize: 15, fontWeight: "800" },
   playerPickerMeta: { color: Colors.textMuted, fontSize: 13, lineHeight: 18 },
   optionCard: { borderRadius: 20, borderWidth: 1, borderColor: "#dfe7d8", backgroundColor: "#f8faf5", padding: 14, gap: 12 },

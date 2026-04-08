@@ -7,7 +7,7 @@
  *
  * Modos:
  *  - view: só visualização (nome do jogador ou label da posição)
- *  - assign: clique em slot para atribuir o jogador em `pendingPlayerId`
+ *  - assign: clique em slot para selecioná-lo, depois clique no jogador para atribuí-lo
  */
 
 import { Pressable, StyleSheet, Text, View } from "react-native";
@@ -24,8 +24,7 @@ export type SlotAssignment = {
 type Props = {
   formation: TacticalFormation;
   assignments?: SlotAssignment[]; // jogadores já atribuídos
-  pendingPlayerId?: string | null; // jogador aguardando alocação (modo assign)
-  pendingPlayerName?: string | null;
+  selectedSlotId?: string | null; // slot aguardando um jogador (modo assign)
   onSlotPress?: (slot: TacticalFormationSlot) => void;
   disabled?: boolean;
 };
@@ -49,13 +48,11 @@ const TEXT_DIM = "rgba(255,255,255,0.65)";
 export default function TacticalField({
   formation,
   assignments = [],
-  pendingPlayerId,
-  pendingPlayerName,
+  selectedSlotId,
   onSlotPress,
   disabled = false,
 }: Props) {
   const assignmentBySlot = new Map(assignments.map((a) => [a.slotId, a]));
-  const isAssignMode = !!pendingPlayerId;
 
   return (
     <View style={styles.wrapper}>
@@ -80,7 +77,7 @@ export default function TacticalField({
         {formation.slots.map((slot) => {
           const assignment = assignmentBySlot.get(slot.id);
           const isFilled = !!assignment;
-          const isPending = isAssignMode; // qualquer slot vira alvo no modo assign
+          const isSelected = slot.id === selectedSlotId;
 
           return (
             <Pressable
@@ -93,7 +90,7 @@ export default function TacticalField({
                   top: `${slot.position_y}%`,
                 },
                 isFilled ? styles.slotFilled : styles.slotEmpty,
-                isPending && !isFilled && styles.slotPending,
+                isSelected && styles.slotPending,
               ]}
             >
               {isFilled ? (
@@ -101,19 +98,18 @@ export default function TacticalField({
                   {assignment!.playerName.split(" ")[0]}
                 </Text>
               ) : (
-                <Text style={styles.slotLabel}>{slot.slot_label}</Text>
+                <Text style={[styles.slotLabel, isSelected && styles.slotLabelSelected]}>{slot.slot_label}</Text>
               )}
             </Pressable>
           );
         })}
       </View>
 
-      {/* ── Banner do jogador pendente ──────────────────────────────────────── */}
-      {isAssignMode && pendingPlayerName && (
+      {/* ── Banner de posição selecionada ─────────────────────────────────── */}
+      {selectedSlotId && (
         <View style={styles.pendingBanner}>
           <Text style={styles.pendingText}>
-            👆 Toque em uma posição para colocar{" "}
-            <Text style={styles.pendingName}>{pendingPlayerName.split(" ")[0]}</Text>
+            👆 Toque em um jogador para posicioná-lo
           </Text>
         </View>
       )}
@@ -193,7 +189,7 @@ const styles = StyleSheet.create({
     borderColor: LINE_COLOR,
     top: "50%",
     left: "50%",
-    transform: [{ translateX: "-17%" }, { translateY: "-50%" }],
+    transform: [{ translateX: "-50%" }, { translateY: "-50%" }],
     backgroundColor: "transparent",
   },
   centerDot: {
@@ -283,6 +279,10 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: "700",
     letterSpacing: 0.3,
+  },
+  slotLabelSelected: {
+    color: TEXT_WHITE,
+    fontWeight: "900",
   },
   slotPlayerName: {
     color: TEXT_WHITE,
