@@ -53,6 +53,7 @@ export default function TacticalField({
   disabled = false,
 }: Props) {
   const assignmentBySlot = new Map(assignments.map((a) => [a.slotId, a]));
+  const selectedSlot = selectedSlotId ? formation.slots.find((s) => s.id === selectedSlotId) : null;
 
   return (
     <View style={styles.wrapper}>
@@ -78,27 +79,29 @@ export default function TacticalField({
           const assignment = assignmentBySlot.get(slot.id);
           const isFilled = !!assignment;
           const isSelected = slot.id === selectedSlotId;
+          const firstName = assignment?.playerName.split(" ")[0] ?? "";
 
           return (
             <Pressable
               key={slot.id}
               onPress={() => !disabled && onSlotPress?.(slot)}
               style={[
-                styles.slot,
-                {
-                  left: `${slot.position_x}%`,
-                  top: `${slot.position_y}%`,
-                },
+                styles.slotBase,
+                { left: `${slot.position_x}%`, top: `${slot.position_y}%` },
+                isFilled ? styles.slotShapePill : styles.slotShapeCircle,
                 isFilled ? styles.slotFilled : styles.slotEmpty,
                 isSelected && styles.slotPending,
               ]}
             >
               {isFilled ? (
-                <Text style={styles.slotPlayerName} numberOfLines={1}>
-                  {assignment!.playerName.split(" ")[0]}
-                </Text>
+                <View style={styles.pillContent}>
+                  <Text style={styles.pillName} numberOfLines={1}>{firstName}</Text>
+                  <Text style={styles.pillLabel}>· {slot.slot_label}</Text>
+                </View>
               ) : (
-                <Text style={[styles.slotLabel, isSelected && styles.slotLabelSelected]}>{slot.slot_label}</Text>
+                <Text style={[styles.slotLabel, isSelected && styles.slotLabelSelected]}>
+                  {slot.slot_label}
+                </Text>
               )}
             </Pressable>
           );
@@ -106,10 +109,11 @@ export default function TacticalField({
       </View>
 
       {/* ── Banner de posição selecionada ─────────────────────────────────── */}
-      {selectedSlotId && (
+      {selectedSlot && (
         <View style={styles.pendingBanner}>
           <Text style={styles.pendingText}>
-            👆 Toque em um jogador para posicioná-lo
+            👆 Toque em um jogador para colocar no{" "}
+            <Text style={styles.pendingName}>{selectedSlot.slot_label}</Text>
           </Text>
         </View>
       )}
@@ -141,6 +145,8 @@ function FieldLines() {
 
 const SLOT_SIZE = 48;
 const SLOT_HALF = SLOT_SIZE / 2;
+const PILL_W = 82;
+const PILL_H = 34;
 
 const styles = StyleSheet.create({
   wrapper: {
@@ -249,18 +255,30 @@ const styles = StyleSheet.create({
     backgroundColor: "transparent",
   },
 
-  // Slots de posição
-  slot: {
+  // Slots de posição — base (posicionamento absoluto compartilhado)
+  slotBase: {
     position: "absolute",
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 2,
+  },
+  // Forma: círculo (slot vazio)
+  slotShapeCircle: {
     width: SLOT_SIZE,
     height: SLOT_SIZE,
     borderRadius: SLOT_HALF,
-    alignItems: "center",
-    justifyContent: "center",
     marginLeft: -SLOT_HALF,
     marginTop: -SLOT_HALF,
-    borderWidth: 2,
     paddingHorizontal: 2,
+  },
+  // Forma: pill retangular (slot preenchido)
+  slotShapePill: {
+    width: PILL_W,
+    height: PILL_H,
+    borderRadius: 8,
+    marginLeft: -(PILL_W / 2),
+    marginTop: -(PILL_H / 2),
+    paddingHorizontal: 6,
   },
   slotEmpty: {
     backgroundColor: SLOT_EMPTY,
@@ -284,11 +302,24 @@ const styles = StyleSheet.create({
     color: TEXT_WHITE,
     fontWeight: "900",
   },
-  slotPlayerName: {
+  // Pill preenchida: conteúdo interno
+  pillContent: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 3,
+    flexShrink: 1,
+  },
+  pillName: {
     color: TEXT_WHITE,
-    fontSize: 10,
+    fontSize: 11,
     fontWeight: "800",
-    textAlign: "center",
+    flexShrink: 1,
+  },
+  pillLabel: {
+    color: "rgba(255,255,255,0.65)",
+    fontSize: 9,
+    fontWeight: "600",
+    flexShrink: 0,
   },
 
   // Banner do jogador pendente

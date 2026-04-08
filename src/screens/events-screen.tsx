@@ -2991,15 +2991,18 @@ export default function EventsScreen() {
                       {selectedParticipants.map((item) => {
                         const isInTeam = matchHomePlayerIds.includes(item.player.id);
                         const slotPendingForHome = pendingSlot?.team === "home";
+                        const homeAssignment = homeSlotAssignments.find((a) => a.playerId === item.player.id);
+                        const assignedLabel = homeAssignment
+                          ? homeFormation?.slots.find((s) => s.id === homeAssignment.slotId)?.slot_label ?? null
+                          : null;
                         return (
                           <Pressable
                             key={`home-${item.player.id}`}
                             onPress={() => {
                               if (slotPendingForHome && isInTeam) {
                                 assignPlayerToPendingSlot(item.player.id, item.player.full_name, "home");
-                              } else {
-                                toggleMatchPlayer("home", item.player.id);
                               }
+                              // sem slot pendente: nada acontece
                             }}
                             style={[
                               styles.chip,
@@ -3008,6 +3011,7 @@ export default function EventsScreen() {
                             ]}>
                             <Text style={[styles.chipText, isInTeam && styles.chipTextSelected]}>
                               {item.player.full_name.split(" ")[0]}
+                              {assignedLabel ? ` · ${assignedLabel}` : ""}
                             </Text>
                           </Pressable>
                         );
@@ -3059,15 +3063,18 @@ export default function EventsScreen() {
                       {selectedParticipants.map((item) => {
                         const isInTeam = matchAwayPlayerIds.includes(item.player.id);
                         const slotPendingForAway = pendingSlot?.team === "away";
+                        const awayAssignment = awaySlotAssignments.find((a) => a.playerId === item.player.id);
+                        const assignedLabel = awayAssignment
+                          ? awayFormation?.slots.find((s) => s.id === awayAssignment.slotId)?.slot_label ?? null
+                          : null;
                         return (
                           <Pressable
                             key={`away-${item.player.id}`}
                             onPress={() => {
                               if (slotPendingForAway && isInTeam) {
                                 assignPlayerToPendingSlot(item.player.id, item.player.full_name, "away");
-                              } else {
-                                toggleMatchPlayer("away", item.player.id);
                               }
+                              // sem slot pendente: nada acontece
                             }}
                             style={[
                               styles.chip,
@@ -3076,6 +3083,7 @@ export default function EventsScreen() {
                             ]}>
                             <Text style={[styles.chipText, isInTeam && styles.chipTextSelected]}>
                               {item.player.full_name.split(" ")[0]}
+                              {assignedLabel ? ` · ${assignedLabel}` : ""}
                             </Text>
                           </Pressable>
                         );
