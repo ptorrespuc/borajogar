@@ -16,6 +16,7 @@ import type {
   EventPollOption,
   EventPollVote,
   ModalityPosition,
+  ModalityPositionWithRating,
   PollTemplate,
   Profile,
   SportModality,
@@ -38,7 +39,7 @@ export type RosterMember = {
   membership: AccountMembership;
   profile: Profile;
   priorityGroup: AccountPriorityGroup | null;
-  preferredPositions: ModalityPosition[];
+  preferredPositions: ModalityPositionWithRating[];
 };
 
 export type AccountMembershipAdminItem = {
@@ -62,7 +63,7 @@ export type AccountPlayerAdminItem = {
   player: AccountPlayer;
   linkedProfile: Profile | null;
   priorityGroup: AccountPriorityGroup | null;
-  preferredPositions: ModalityPosition[];
+  preferredPositions: ModalityPositionWithRating[];
 };
 
 export type WeeklyEventParticipantItem = {
@@ -71,7 +72,7 @@ export type WeeklyEventParticipantItem = {
   membership: AccountMembership | null;
   linkedProfile: Profile | null;
   priorityGroup: AccountPriorityGroup | null;
-  preferredPositions: ModalityPosition[];
+  preferredPositions: ModalityPositionWithRating[];
 };
 
 export type EventPollResultEntry = {
@@ -159,6 +160,11 @@ export type UpdateEventMatchInput = {
   awayPlayers: EventMatchLineupInput[];
 };
 
+export type PlayerPositionInput = {
+  positionId: string;
+  rating: number | null;
+};
+
 export type CreateAccountPlayerInput = {
   accountId: string;
   fullName: string;
@@ -173,7 +179,7 @@ export type CreateAccountPlayerInput = {
   priorityGroupId: string | null;
   isDefaultForWeeklyList: boolean;
   createdBy: string;
-  preferredPositionIds: string[];
+  preferredPositions: PlayerPositionInput[];
 };
 
 export type UpdateAccountPlayerInput = {
@@ -189,7 +195,7 @@ export type UpdateAccountPlayerInput = {
   linkedProfileId: string | null;
   priorityGroupId: string | null;
   isDefaultForWeeklyList: boolean;
-  preferredPositionIds: string[];
+  preferredPositions: PlayerPositionInput[];
 };
 
 export type UpsertAccountPlayerFromAccessInput = {
@@ -205,7 +211,7 @@ export type UpsertAccountPlayerFromAccessInput = {
   linkedProfileId: string;
   priorityGroupId: string | null;
   isDefaultForWeeklyList: boolean;
-  preferredPositionIds: string[];
+  preferredPositions: PlayerPositionInput[];
   createdBy: string;
 };
 
@@ -764,7 +770,7 @@ export async function listAccountRoster(
   const priorityGroupMap = new Map(
     ((priorityGroupData ?? []) as AccountPriorityGroup[]).map((group) => [group.id, group]),
   );
-  const preferencesByMembership = new Map<string, ModalityPosition[]>();
+  const preferencesByMembership = new Map<string, ModalityPositionWithRating[]>();
 
   for (const preference of preferenceData ?? []) {
     const resolvedPreference = preference as {
@@ -778,7 +784,7 @@ export async function listAccountRoster(
     }
 
     const current = preferencesByMembership.get(resolvedPreference.membership_id) ?? [];
-    current.push(position);
+    current.push({ ...position, positionRating: null });
     preferencesByMembership.set(resolvedPreference.membership_id, current);
   }
 
@@ -1130,9 +1136,14 @@ export async function updateSportsAccount(input: UpdateSportsAccountInput) {
 
 async function replaceAccountPlayerPositionPreferences(
   accountPlayerId: string,
-  orderedPositionIds: string[],
+  orderedPositions: { positionId: string; rating: number | null }[],
 ) {
-  const uniqueOrderedPositionIds = [...new Set(orderedPositionIds)];
+  const seen = new Set<string>();
+  const uniqueOrderedPositions = orderedPositions.filter((item) => {
+    if (seen.has(item.positionId)) return false;
+    seen.add(item.positionId);
+    return true;
+  });
 
   const { error: deleteError } = await supabase
     .from("account_player_position_preferences")
@@ -1141,17 +1152,18 @@ async function replaceAccountPlayerPositionPreferences(
 
   throwIfError(deleteError);
 
-  if (uniqueOrderedPositionIds.length === 0) {
+  if (uniqueOrderedPositions.length === 0) {
     return;
   }
 
   const { error: insertError } = await supabase
     .from("account_player_position_preferences")
     .insert(
-      uniqueOrderedPositionIds.map((positionId, index) => ({
+      uniqueOrderedPositions.map((item, index) => ({
         account_player_id: accountPlayerId,
-        modality_position_id: positionId,
+        modality_position_id: item.positionId,
         preference_order: index + 1,
+        rating: item.rating,
       })),
     );
 
@@ -1240,7 +1252,7 @@ export async function listAccountPlayers(
         }),
     supabase
       .from("account_player_position_preferences")
-      .select("id, account_player_id, modality_position_id, preference_order, created_at")
+      .select("id, account_player_id, modality_position_id, preference_order, rating, created_at")
       .in("account_player_id", playerIds)
       .order("preference_order", { ascending: true }),
     supabase
@@ -1262,7 +1274,7 @@ export async function listAccountPlayers(
   const positionMap = new Map(
     ((positionData ?? []) as ModalityPosition[]).map((position) => [position.id, position]),
   );
-  const preferencesByPlayer = new Map<string, ModalityPosition[]>();
+  const preferencesByPlayer = new Map<string, ModalityPositionWithRating[]>();
 
   for (const preference of (preferenceData ?? []) as AccountPlayerPositionPreference[]) {
     const position = positionMap.get(preference.modality_position_id);
@@ -1272,7 +1284,7 @@ export async function listAccountPlayers(
     }
 
     const current = preferencesByPlayer.get(preference.account_player_id) ?? [];
-    current.push(position);
+    current.push({ ...position, positionRating: preference.rating ?? null });
     preferencesByPlayer.set(preference.account_player_id, current);
   }
 
@@ -1536,7 +1548,7 @@ export async function listWeeklyEventParticipants(
     playerIds.length > 0
       ? supabase
           .from("account_player_position_preferences")
-          .select("id, account_player_id, modality_position_id, preference_order, created_at")
+          .select("id, account_player_id, modality_position_id, preference_order, rating, created_at")
           .in("account_player_id", playerIds)
           .order("preference_order", { ascending: true })
       : Promise.resolve({
@@ -1562,7 +1574,7 @@ export async function listWeeklyEventParticipants(
   const positionMap = new Map(
     ((positionData ?? []) as ModalityPosition[]).map((position) => [position.id, position]),
   );
-  const preferencesByPlayer = new Map<string, ModalityPosition[]>();
+  const preferencesByPlayer = new Map<string, ModalityPositionWithRating[]>();
 
   for (const preference of (preferenceData ?? []) as AccountPlayerPositionPreference[]) {
     const position = positionMap.get(preference.modality_position_id);
@@ -1572,7 +1584,7 @@ export async function listWeeklyEventParticipants(
     }
 
     const current = preferencesByPlayer.get(preference.account_player_id) ?? [];
-    current.push(position);
+    current.push({ ...position, positionRating: preference.rating ?? null });
     preferencesByPlayer.set(preference.account_player_id, current);
   }
 
@@ -2770,7 +2782,7 @@ export async function createAccountPlayer(input: CreateAccountPlayerInput) {
 
   const player = playerData as AccountPlayer;
 
-  await replaceAccountPlayerPositionPreferences(player.id, input.preferredPositionIds);
+  await replaceAccountPlayerPositionPreferences(player.id, input.preferredPositions);
   await syncPlayerMembership({
     accountId: input.accountId,
     linkedProfileId: input.linkedProfileId,
@@ -2816,7 +2828,7 @@ export async function updateAccountPlayer(input: UpdateAccountPlayerInput) {
 
   throwIfError(updateError);
 
-  await replaceAccountPlayerPositionPreferences(input.playerId, input.preferredPositionIds);
+  await replaceAccountPlayerPositionPreferences(input.playerId, input.preferredPositions);
   await syncPlayerMembership({
     accountId: existingPlayer.account_id,
     linkedProfileId: input.linkedProfileId,
@@ -2867,7 +2879,7 @@ export async function upsertAccountPlayerFromAccess(
         linkedProfileId: input.linkedProfileId,
         priorityGroupId: input.priorityGroupId,
         isDefaultForWeeklyList: input.isDefaultForWeeklyList,
-        preferredPositionIds: input.preferredPositionIds,
+        preferredPositions: input.preferredPositions,
       });
 
     const { data: updatedPlayerData, error: updatedPlayerError } = await supabase
@@ -2894,7 +2906,7 @@ export async function upsertAccountPlayerFromAccess(
     priorityGroupId: input.priorityGroupId,
     isDefaultForWeeklyList: input.isDefaultForWeeklyList,
     createdBy: input.createdBy,
-    preferredPositionIds: input.preferredPositionIds,
+    preferredPositions: input.preferredPositions,
   });
 }
 

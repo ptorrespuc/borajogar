@@ -142,7 +142,12 @@ export type AccountPlayerPositionPreference = {
   account_player_id: string;
   modality_position_id: string;
   preference_order: number;
+  rating: number | null;
   created_at: string;
+};
+
+export type ModalityPositionWithRating = ModalityPosition & {
+  positionRating: number | null;
 };
 
 export type MembershipPositionPreference = {

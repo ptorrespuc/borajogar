@@ -30,6 +30,7 @@ import {
   updateProfileBasics,
   type AccountOverview,
   type AccountPlayerAdminItem,
+  type PlayerPositionInput,
   type ProvisionedAuthProfile,
 } from "@/src/lib/accounts";
 import {
@@ -288,7 +289,8 @@ export default function RosterScreen() {
   const [playerPreparedPhoto, setPlayerPreparedPhoto] = useState<PreparedPlayerPhoto | null>(null);
   const [playerPhotoTouched, setPlayerPhotoTouched] = useState(false);
   const [playerPriorityGroupDraftId, setPlayerPriorityGroupDraftId] = useState<string | null>(null);
-  const [playerPreferredPositionIds, setPlayerPreferredPositionIds] = useState<string[]>([]);
+  // positionId → rating draft string; chave presente = posição marcada como favorita
+  const [playerPositionDrafts, setPlayerPositionDrafts] = useState<Record<string, string>>({});
   const [playerBirthDateDraft, setPlayerBirthDateDraft] = useState("");
   const [playerRatingDraft, setPlayerRatingDraft] = useState("");
   const [playerDominantSideDraft, setPlayerDominantSideDraft] = useState<DominantSide | null>(null);
@@ -443,7 +445,7 @@ export default function RosterScreen() {
     setPlayerPreparedPhoto(null);
     setPlayerPhotoTouched(false);
     setPlayerPriorityGroupDraftId(overview?.priorityGroups[0]?.id ?? null);
-    setPlayerPreferredPositionIds([]);
+    setPlayerPositionDrafts({});
     setPlayerBirthDateDraft("");
     setPlayerRatingDraft("");
     setPlayerDominantSideDraft(null);
@@ -465,7 +467,14 @@ export default function RosterScreen() {
     setPlayerPreparedPhoto(null);
     setPlayerPhotoTouched(false);
     setPlayerPriorityGroupDraftId(item.player.priority_group_id ?? overview?.priorityGroups[0]?.id ?? null);
-    setPlayerPreferredPositionIds(item.preferredPositions.map((position) => position.id));
+    setPlayerPositionDrafts(
+      Object.fromEntries(
+        item.preferredPositions.map((pos) => [
+          pos.id,
+          pos.positionRating !== null ? pos.positionRating.toFixed(2) : "",
+        ]),
+      ),
+    );
     setPlayerBirthDateDraft(formatBirthDateForInput(item.player.birth_date));
     setPlayerRatingDraft(item.player.rating !== null ? item.player.rating.toFixed(2) : "");
     setPlayerDominantSideDraft(item.player.dominant_side);
@@ -509,11 +518,25 @@ export default function RosterScreen() {
   }
 
   function togglePreferredPosition(positionId: string) {
-    setPlayerPreferredPositionIds((currentValue) =>
-      currentValue.includes(positionId)
-        ? currentValue.filter((item) => item !== positionId)
-        : [...currentValue, positionId],
-    );
+    setPlayerPositionDrafts((current) => {
+      if (positionId in current) {
+        const next = { ...current };
+        delete next[positionId];
+        return next;
+      }
+      return { ...current, [positionId]: "" };
+    });
+  }
+
+  function setPositionRatingDraft(positionId: string, value: string) {
+    setPlayerPositionDrafts((current) => ({ ...current, [positionId]: value }));
+  }
+
+  function buildPreferredPositions(): PlayerPositionInput[] {
+    return Object.entries(playerPositionDrafts).map(([positionId, ratingStr]) => ({
+      positionId,
+      rating: ratingStr.trim() ? (parseOptionalPlayerRating(ratingStr) ?? null) : null,
+    }));
   }
 
   function openPhotoSourcePicker(onLibrary: () => void, onCamera: () => void) {
@@ -622,7 +645,7 @@ export default function RosterScreen() {
     playerNotes: string | null;
     priorityGroupId: string | null;
     isDefaultForWeeklyList: boolean;
-    preferredPositionIds: string[];
+    preferredPositions: PlayerPositionInput[];
   }) {
     if (playerPreparedPhoto) {
       const uploadedPhotoUrl = await uploadPreparedPlayerPhoto({
@@ -645,7 +668,7 @@ export default function RosterScreen() {
         linkedProfileId: input.linkedProfileId,
         priorityGroupId: input.priorityGroupId,
         isDefaultForWeeklyList: input.isDefaultForWeeklyList,
-        preferredPositionIds: input.preferredPositionIds,
+        preferredPositions: input.preferredPositions,
       });
     } else if (
       playerPhotoTouched &&
@@ -705,7 +728,7 @@ export default function RosterScreen() {
             linkedProfileId: profile.id,
             priorityGroupId,
             isDefaultForWeeklyList,
-            preferredPositionIds: playerPreferredPositionIds,
+            preferredPositions: buildPreferredPositions(),
           });
           savedPlayerId = currentPlayer.player.id;
         } else {
@@ -723,7 +746,7 @@ export default function RosterScreen() {
             priorityGroupId,
             isDefaultForWeeklyList: true,
             createdBy: profile.id,
-            preferredPositionIds: playerPreferredPositionIds,
+            preferredPositions: buildPreferredPositions(),
           });
           savedPlayerId = createdPlayer.id;
         }
@@ -742,7 +765,7 @@ export default function RosterScreen() {
             playerNotes,
             priorityGroupId,
             isDefaultForWeeklyList,
-            preferredPositionIds: playerPreferredPositionIds,
+            preferredPositions: buildPreferredPositions(),
           });
         }
 
@@ -812,7 +835,7 @@ export default function RosterScreen() {
           linkedProfileId,
           priorityGroupId: playerPriorityGroupDraftId,
           isDefaultForWeeklyList: playerWeeklyDefaultDraft,
-          preferredPositionIds: playerPreferredPositionIds,
+          preferredPositions: buildPreferredPositions(),
         });
         savedPlayerId = playerModal.targetId;
       } else {
@@ -830,7 +853,7 @@ export default function RosterScreen() {
           priorityGroupId: playerPriorityGroupDraftId,
           isDefaultForWeeklyList: playerWeeklyDefaultDraft,
           createdBy: profile.id,
-          preferredPositionIds: playerPreferredPositionIds,
+          preferredPositions: buildPreferredPositions(),
         });
         savedPlayerId = createdPlayer.id;
       }
@@ -849,7 +872,7 @@ export default function RosterScreen() {
           playerNotes,
           priorityGroupId: playerPriorityGroupDraftId,
           isDefaultForWeeklyList: playerWeeklyDefaultDraft,
-          preferredPositionIds: playerPreferredPositionIds,
+          preferredPositions: buildPreferredPositions(),
         });
       }
 
@@ -1148,28 +1171,36 @@ export default function RosterScreen() {
                   )}
 
                   <View style={styles.fieldBlock}>
-                    <Text style={styles.label}>Posicoes favoritas</Text>
+                    <Text style={styles.label}>Posicoes e notas</Text>
                     <Text style={styles.fieldHint}>
-                      Toque para montar a ordem de preferencia. O primeiro chip selecionado vira a posicao principal.
+                      Marque as posicoes que o jogador joga e informe a nota (0-10) por posicao.
                     </Text>
-                    <View style={styles.chips}>
-                      {modalityPositions.map((position) => {
-                        const selectedIndex = playerPreferredPositionIds.indexOf(position.id);
-                        const isSelected = selectedIndex >= 0;
+                    {modalityPositions.map((position) => {
+                      const isSelected = position.id in playerPositionDrafts;
+                      const ratingDraft = playerPositionDrafts[position.id] ?? "";
 
-                        return (
+                      return (
+                        <View key={position.id} style={positionRatingStyles.row}>
                           <Pressable
-                            key={position.id}
                             onPress={() => togglePreferredPosition(position.id)}
-                            style={[styles.chip, isSelected && styles.chipSelected]}>
-                            <Text style={[styles.chipText, isSelected && styles.chipTextSelected]}>
-                              {isSelected ? `${selectedIndex + 1}. ` : ""}
+                            style={[positionRatingStyles.positionChip, isSelected && positionRatingStyles.positionChipSelected]}>
+                            <Text style={[positionRatingStyles.positionChipText, isSelected && positionRatingStyles.positionChipTextSelected]}>
                               {position.name}
                             </Text>
                           </Pressable>
-                        );
-                      })}
-                    </View>
+                          {isSelected && (
+                            <TextInput
+                              value={ratingDraft}
+                              onChangeText={(value) => setPositionRatingDraft(position.id, value)}
+                              placeholder="Nota"
+                              keyboardType="decimal-pad"
+                              style={positionRatingStyles.ratingInput}
+                              placeholderTextColor={Colors.textMuted}
+                            />
+                          )}
+                        </View>
+                      );
+                    })}
                   </View>
                 </View>
 
@@ -1366,7 +1397,11 @@ export default function RosterScreen() {
                       <Text style={styles.playerMeta}>
                         Posicoes:{" "}
                         {currentPlayer.preferredPositions.length > 0
-                          ? currentPlayer.preferredPositions.map((position) => position.name).join(", ")
+                          ? currentPlayer.preferredPositions
+                              .map((pos) =>
+                                pos.positionRating !== null ? `${pos.name} ${pos.positionRating.toFixed(1)}` : pos.name,
+                              )
+                              .join(" · ")
                           : "Nao informadas"}
                       </Text>
                       {currentPlayer.player.notes ? (
@@ -1455,7 +1490,11 @@ export default function RosterScreen() {
                       <Text style={styles.playerMeta}>
                         Posicoes:{" "}
                         {item.preferredPositions.length > 0
-                          ? item.preferredPositions.map((position) => position.name).join(", ")
+                          ? item.preferredPositions
+                              .map((pos) =>
+                                pos.positionRating !== null ? `${pos.name} ${pos.positionRating.toFixed(1)}` : pos.name,
+                              )
+                              .join(" · ")
                           : "Nao informadas"}
                       </Text>
                       {item.player.notes ? (
@@ -1519,6 +1558,48 @@ export default function RosterScreen() {
     </>
   );
 }
+
+const positionRatingStyles = StyleSheet.create({
+  row: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    marginBottom: 8,
+  },
+  positionChip: {
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    backgroundColor: Colors.surface,
+    minWidth: 70,
+    alignItems: "center",
+  },
+  positionChipSelected: {
+    backgroundColor: Colors.tint,
+    borderColor: Colors.tint,
+  },
+  positionChipText: {
+    fontSize: 13,
+    color: Colors.text,
+    fontWeight: "500",
+  },
+  positionChipTextSelected: {
+    color: "#ffffff",
+  },
+  ratingInput: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    fontSize: 14,
+    color: Colors.text,
+    backgroundColor: Colors.surface,
+  },
+});
 
 const styles = StyleSheet.create({
   screen: {

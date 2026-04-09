@@ -1821,7 +1821,7 @@ export default function HomeScreen() {
           linkedProfileId: profileId,
           priorityGroupId: membershipPriorityGroupModalId,
           isDefaultForWeeklyList: membershipWeeklyDefaultDraft,
-          preferredPositionIds: membershipPreferredPositionIds,
+          preferredPositions: membershipPreferredPositionIds.map((id) => ({ positionId: id, rating: null })),
           createdBy: profile.id,
         });
 
@@ -1844,7 +1844,7 @@ export default function HomeScreen() {
             linkedProfileId: profileId,
             priorityGroupId: membershipPriorityGroupModalId,
             isDefaultForWeeklyList: membershipWeeklyDefaultDraft,
-            preferredPositionIds: membershipPreferredPositionIds,
+            preferredPositions: membershipPreferredPositionIds.map((id) => ({ positionId: id, rating: null })),
           });
         } else if (
           membershipPhotoTouched &&
@@ -2094,7 +2094,7 @@ export default function HomeScreen() {
           linkedProfileId,
           priorityGroupId: playerPriorityGroupDraftId,
           isDefaultForWeeklyList: playerWeeklyDefaultDraft,
-          preferredPositionIds: playerPreferredPositionIds,
+          preferredPositions: playerPreferredPositionIds.map((id) => ({ positionId: id, rating: null })),
         });
         savedPlayerId = adminModal.targetId;
       } else {
@@ -2110,7 +2110,7 @@ export default function HomeScreen() {
           priorityGroupId: playerPriorityGroupDraftId,
           isDefaultForWeeklyList: playerWeeklyDefaultDraft,
           createdBy: profile.id,
-          preferredPositionIds: playerPreferredPositionIds,
+          preferredPositions: playerPreferredPositionIds.map((id) => ({ positionId: id, rating: null })),
         });
         savedPlayerId = createdPlayer.id;
       }
@@ -2134,7 +2134,7 @@ export default function HomeScreen() {
           linkedProfileId,
           priorityGroupId: playerPriorityGroupDraftId,
           isDefaultForWeeklyList: playerWeeklyDefaultDraft,
-          preferredPositionIds: playerPreferredPositionIds,
+          preferredPositions: playerPreferredPositionIds.map((id) => ({ positionId: id, rating: null })),
         });
       } else if (playerPhotoTouched && !desiredPhotoUrl && isManagedPlayerPhotoUrl(playerExistingPhotoUrl)) {
         await deleteManagedPlayerPhoto(playerExistingPhotoUrl);
@@ -2307,7 +2307,7 @@ export default function HomeScreen() {
         linkedProfileId: item.player.linked_profile_id,
         priorityGroupId: item.player.priority_group_id,
         isDefaultForWeeklyList: nextValue,
-        preferredPositionIds: item.preferredPositions.map((position) => position.id),
+        preferredPositions: item.preferredPositions.map((pos) => ({ positionId: pos.id, rating: pos.positionRating })),
       });
 
       await reloadSelectedWorkspace();

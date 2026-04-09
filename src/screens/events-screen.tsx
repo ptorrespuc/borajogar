@@ -501,10 +501,16 @@ function autoGenerateMatchTeamsByPositions(input: {
         return null;
       }
 
+      // Mapa de nota por posição (positionId → rating)
+      const positionRatingMap = new Map(
+        entry.participant.preferredPositions.map((pos) => [pos.id, pos.positionRating]),
+      );
+
       return {
         id: playerId,
         order: entry.order,
         rating: getBalanceRating(entry.participant.player.rating),
+        positionRatingMap,
         preferredPositionIds: entry.participant.preferredPositions
           .map((position) => position.id)
           .filter((positionId) => formationPositionIds.includes(positionId)),
@@ -517,6 +523,7 @@ function autoGenerateMatchTeamsByPositions(input: {
         id: string;
         order: number;
         rating: number;
+        positionRatingMap: Map<string, number | null>;
         preferredPositionIds: string[];
       } => item !== null,
     );
@@ -657,10 +664,12 @@ function autoGenerateMatchTeamsByPositions(input: {
 
   for (const { position, countPerTeam } of selectedFormation) {
     const candidates = [...(assignedPlayersByPosition.get(position.id) ?? [])].sort((first, second) => {
-      if (second.rating !== first.rating) {
-        return second.rating - first.rating;
+      // Usa nota específica da posição quando disponível, senão nota geral
+      const firstEffective = first.positionRatingMap.get(position.id) ?? first.rating;
+      const secondEffective = second.positionRatingMap.get(position.id) ?? second.rating;
+      if (secondEffective !== firstEffective) {
+        return secondEffective - firstEffective;
       }
-
       return first.order - second.order;
     });
 
@@ -668,6 +677,7 @@ function autoGenerateMatchTeamsByPositions(input: {
     let awayRemaining = countPerTeam;
 
     for (const candidate of candidates) {
+      const effectiveRating = candidate.positionRatingMap.get(position.id) ?? candidate.rating;
       const shouldUseHome =
         awayRemaining === 0
           ? true
@@ -679,13 +689,13 @@ function autoGenerateMatchTeamsByPositions(input: {
 
       if (shouldUseHome) {
         homePlayerIds.push(candidate.id);
-        homeRating += candidate.rating;
+        homeRating += effectiveRating;
         homeRemaining -= 1;
         continue;
       }
 
       awayPlayerIds.push(candidate.id);
-      awayRating += candidate.rating;
+      awayRating += effectiveRating;
       awayRemaining -= 1;
     }
   }
