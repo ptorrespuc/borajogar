@@ -11,7 +11,7 @@
  */
 
 import { Pressable, StyleSheet, Text, View } from "react-native";
-import type { TacticalFormation, TacticalFormationSlot } from "@/src/types/domain";
+import type { PositionClassification, TacticalFormation, TacticalFormationSlot } from "@/src/types/domain";
 
 // ─── Tipos públicos ────────────────────────────────────────────────────────────
 
@@ -19,6 +19,7 @@ export type SlotAssignment = {
   slotId: string;
   playerId: string;
   playerName: string;
+  classification?: PositionClassification | null;
 };
 
 type Props = {
@@ -38,6 +39,16 @@ const SLOT_EMPTY = "rgba(255,255,255,0.18)";
 const SLOT_EMPTY_BORDER = "rgba(255,255,255,0.5)";
 const SLOT_FILLED = "#1d7f46";
 const SLOT_FILLED_BORDER = "#a8e6b8";
+// Cores por classificação
+const CLASS_PRINCIPAL = "#1d7f46";      // verde — posição principal
+const CLASS_PRINCIPAL_BORDER = "#a8e6b8";
+const CLASS_SECONDARY = "#b86f0a";      // laranja — posição secundária
+const CLASS_SECONDARY_BORDER = "#ffd080";
+const CLASS_IMPROVISO = "#8b2020";      // vermelho — improviso
+const CLASS_IMPROVISO_BORDER = "#f5a0a0";
+const CLASS_BADGE_PRINCIPAL = "#a8e6b8";
+const CLASS_BADGE_SECONDARY = "#ffd080";
+const CLASS_BADGE_IMPROVISO = "#f5a0a0";
 const SLOT_PENDING = "#f5a623";
 const SLOT_PENDING_BORDER = "#ffe0a0";
 const TEXT_WHITE = "#ffffff";
@@ -80,6 +91,22 @@ export default function TacticalField({
           const isFilled = !!assignment;
           const isSelected = slot.id === selectedSlotId;
           const firstName = assignment?.playerName.split(" ")[0] ?? "";
+          const cls = assignment?.classification ?? null;
+
+          const filledBg =
+            cls === "secondary" ? CLASS_SECONDARY
+            : cls === "improviso" ? CLASS_IMPROVISO
+            : CLASS_PRINCIPAL;
+          const filledBorder =
+            cls === "secondary" ? CLASS_SECONDARY_BORDER
+            : cls === "improviso" ? CLASS_IMPROVISO_BORDER
+            : CLASS_PRINCIPAL_BORDER;
+          const badgeColor =
+            cls === "secondary" ? CLASS_BADGE_SECONDARY
+            : cls === "improviso" ? CLASS_BADGE_IMPROVISO
+            : CLASS_BADGE_PRINCIPAL;
+          const badgeLabel =
+            cls === "secondary" ? "S" : cls === "improviso" ? "I" : "P";
 
           return (
             <Pressable
@@ -89,7 +116,9 @@ export default function TacticalField({
                 styles.slotBase,
                 { left: `${slot.position_x}%`, top: `${slot.position_y}%` },
                 isFilled ? styles.slotShapePill : styles.slotShapeCircle,
-                isFilled ? styles.slotFilled : styles.slotEmpty,
+                isFilled
+                  ? { backgroundColor: filledBg, borderColor: filledBorder, borderWidth: 1.5 }
+                  : styles.slotEmpty,
                 isSelected && styles.slotPending,
               ]}
             >
@@ -97,6 +126,9 @@ export default function TacticalField({
                 <View style={styles.pillContent}>
                   <Text style={styles.pillName} numberOfLines={1}>{firstName}</Text>
                   <Text style={styles.pillLabel}>· {slot.slot_label}</Text>
+                  <View style={[styles.classBadge, { backgroundColor: badgeColor }]}>
+                    <Text style={styles.classBadgeText}>{badgeLabel}</Text>
+                  </View>
                 </View>
               ) : (
                 <Text style={[styles.slotLabel, isSelected && styles.slotLabelSelected]}>
@@ -271,12 +303,12 @@ const styles = StyleSheet.create({
     marginTop: -SLOT_HALF,
     paddingHorizontal: 2,
   },
-  // Forma: pill retangular (slot preenchido)
+  // Forma: pill retangular (slot preenchido) — alargado para caber o badge
   slotShapePill: {
-    width: PILL_W,
+    width: 96,
     height: PILL_H,
     borderRadius: 8,
-    marginLeft: -(PILL_W / 2),
+    marginLeft: -(96 / 2),
     marginTop: -(PILL_H / 2),
     paddingHorizontal: 6,
   },
@@ -320,6 +352,19 @@ const styles = StyleSheet.create({
     fontSize: 9,
     fontWeight: "600",
     flexShrink: 0,
+  },
+  classBadge: {
+    width: 14,
+    height: 14,
+    borderRadius: 3,
+    alignItems: "center",
+    justifyContent: "center",
+    flexShrink: 0,
+  },
+  classBadgeText: {
+    fontSize: 8,
+    fontWeight: "900",
+    color: "#1a3a22",
   },
 
   // Banner do jogador pendente

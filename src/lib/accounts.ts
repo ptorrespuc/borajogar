@@ -17,6 +17,7 @@ import type {
   EventPollVote,
   ModalityPosition,
   ModalityPositionWithRating,
+  PositionClassification,
   PollTemplate,
   Profile,
   SportModality,
@@ -163,6 +164,7 @@ export type UpdateEventMatchInput = {
 export type PlayerPositionInput = {
   positionId: string;
   rating: number | null;
+  classification?: PositionClassification | null;
 };
 
 export type CreateAccountPlayerInput = {
@@ -784,7 +786,7 @@ export async function listAccountRoster(
     }
 
     const current = preferencesByMembership.get(resolvedPreference.membership_id) ?? [];
-    current.push({ ...position, positionRating: null });
+    current.push({ ...position, positionRating: null, classification: null });
     preferencesByMembership.set(resolvedPreference.membership_id, current);
   }
 
@@ -1136,7 +1138,7 @@ export async function updateSportsAccount(input: UpdateSportsAccountInput) {
 
 async function replaceAccountPlayerPositionPreferences(
   accountPlayerId: string,
-  orderedPositions: { positionId: string; rating: number | null }[],
+  orderedPositions: PlayerPositionInput[],
 ) {
   const seen = new Set<string>();
   const uniqueOrderedPositions = orderedPositions.filter((item) => {
@@ -1164,6 +1166,7 @@ async function replaceAccountPlayerPositionPreferences(
         modality_position_id: item.positionId,
         preference_order: index + 1,
         rating: item.rating,
+        classification: item.classification,
       })),
     );
 
@@ -1252,7 +1255,7 @@ export async function listAccountPlayers(
         }),
     supabase
       .from("account_player_position_preferences")
-      .select("id, account_player_id, modality_position_id, preference_order, rating, created_at")
+      .select("id, account_player_id, modality_position_id, preference_order, rating, classification, created_at")
       .in("account_player_id", playerIds)
       .order("preference_order", { ascending: true }),
     supabase
@@ -1284,7 +1287,7 @@ export async function listAccountPlayers(
     }
 
     const current = preferencesByPlayer.get(preference.account_player_id) ?? [];
-    current.push({ ...position, positionRating: preference.rating ?? null });
+    current.push({ ...position, positionRating: preference.rating ?? null, classification: (preference.classification as PositionClassification | null) ?? null });
     preferencesByPlayer.set(preference.account_player_id, current);
   }
 
@@ -1548,7 +1551,7 @@ export async function listWeeklyEventParticipants(
     playerIds.length > 0
       ? supabase
           .from("account_player_position_preferences")
-          .select("id, account_player_id, modality_position_id, preference_order, rating, created_at")
+          .select("id, account_player_id, modality_position_id, preference_order, rating, classification, created_at")
           .in("account_player_id", playerIds)
           .order("preference_order", { ascending: true })
       : Promise.resolve({
@@ -1584,7 +1587,7 @@ export async function listWeeklyEventParticipants(
     }
 
     const current = preferencesByPlayer.get(preference.account_player_id) ?? [];
-    current.push({ ...position, positionRating: preference.rating ?? null });
+    current.push({ ...position, positionRating: preference.rating ?? null, classification: (preference.classification as PositionClassification | null) ?? null });
     preferencesByPlayer.set(preference.account_player_id, current);
   }
 

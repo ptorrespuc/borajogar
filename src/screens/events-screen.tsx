@@ -460,8 +460,16 @@ function buildSlotAssignmentsFromPositions(
     const participant = participantMap.get(playerId);
     if (!participant) continue;
 
+    const assignedPos = participant.preferredPositions.find(
+      (p) => p.id === slot.modality_position_id,
+    );
     usedSlotIds.add(slot.id);
-    result.push({ slotId: slot.id, playerId, playerName: participant.player.full_name });
+    result.push({
+      slotId: slot.id,
+      playerId,
+      playerName: participant.player.full_name,
+      classification: assignedPos?.classification ?? null,
+    });
   }
 
   return result;
@@ -497,8 +505,15 @@ function buildSlotAssignmentsFromRatings(
   const resultSlots: SlotAssignment[] = [];
   const resultPositions: Record<string, string> = {};
 
-  // Fase 1: candidatos com nota por posição — ordenados por nota decrescente
-  type RatedCandidate = { playerId: string; positionId: string; rating: number };
+  // Ordena prioridade de classificação: principal > secondary > improviso > sem classificação
+  const classOrder = { principal: 0, secondary: 1, improviso: 2 };
+
+  type RatedCandidate = {
+    playerId: string;
+    positionId: string;
+    rating: number;
+    classification: "principal" | "secondary" | "improviso" | null;
+  };
   const ratedCandidates: RatedCandidate[] = [];
 
   for (const playerId of playerIds) {
@@ -506,15 +521,26 @@ function buildSlotAssignmentsFromRatings(
     if (!participant) continue;
 
     for (const pos of participant.preferredPositions) {
-      if (pos.positionRating === null) continue; // só considera quem tem nota definida
-      if (!remainingSlotsByPosition.has(pos.id)) continue; // posição não está nesta formação
-      ratedCandidates.push({ playerId, positionId: pos.id, rating: pos.positionRating });
+      if (pos.positionRating === null) continue; // só quem tem nota definida entra na fase 1
+      if (!remainingSlotsByPosition.has(pos.id)) continue;
+      ratedCandidates.push({
+        playerId,
+        positionId: pos.id,
+        rating: pos.positionRating,
+        classification: pos.classification,
+      });
     }
   }
 
-  ratedCandidates.sort((a, b) => b.rating - a.rating);
+  // Ordena: primeiro por classificação (principal > secondary > improviso), depois por nota desc
+  ratedCandidates.sort((a, b) => {
+    const clsA = a.classification != null ? classOrder[a.classification] : 3;
+    const clsB = b.classification != null ? classOrder[b.classification] : 3;
+    if (clsA !== clsB) return clsA - clsB;
+    return b.rating - a.rating;
+  });
 
-  for (const { playerId, positionId } of ratedCandidates) {
+  for (const { playerId, positionId, classification } of ratedCandidates) {
     if (assignedPlayerIds.has(playerId)) continue;
     const slots = remainingSlotsByPosition.get(positionId);
     if (!slots || slots.length === 0) continue;
@@ -522,11 +548,16 @@ function buildSlotAssignmentsFromRatings(
     const slot = slots.shift()!;
     const participant = participantMap.get(playerId)!;
     assignedPlayerIds.add(playerId);
-    resultSlots.push({ slotId: slot.id, playerId, playerName: participant.player.full_name });
+    resultSlots.push({
+      slotId: slot.id,
+      playerId,
+      playerName: participant.player.full_name,
+      classification,
+    });
     resultPositions[playerId] = positionId;
   }
 
-  // Fase 2: jogadores restantes — preenchem slots que sobram, na ordem da formação
+  // Fase final: jogadores sem nota por posição preenchem slots restantes
   const remainingSlotsList: TacticalFormationSlot[] = [];
   for (const slots of remainingSlotsByPosition.values()) {
     remainingSlotsList.push(...slots);
@@ -541,7 +572,12 @@ function buildSlotAssignmentsFromRatings(
     if (!slot) break;
 
     assignedPlayerIds.add(playerId);
-    resultSlots.push({ slotId: slot.id, playerId, playerName: participant.player.full_name });
+    resultSlots.push({
+      slotId: slot.id,
+      playerId,
+      playerName: participant.player.full_name,
+      classification: "improviso", // sem nota definida = improviso por padrão
+    });
     if (slot.modality_position_id) {
       resultPositions[playerId] = slot.modality_position_id;
     }

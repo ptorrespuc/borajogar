@@ -42,7 +42,7 @@ import {
   type PreparedPlayerPhoto,
 } from "@/src/lib/player-photos";
 import { useAuth } from "@/src/providers/auth-provider";
-import type { AccountRole, DominantSide, ModalityPosition, SportsAccount } from "@/src/types/domain";
+import type { AccountRole, DominantSide, ModalityPosition, PositionClassification, SportsAccount } from "@/src/types/domain";
 
 const roleLabels: Record<AccountRole, string> = {
   group_admin: "Admin do grupo",
@@ -289,8 +289,10 @@ export default function RosterScreen() {
   const [playerPreparedPhoto, setPlayerPreparedPhoto] = useState<PreparedPlayerPhoto | null>(null);
   const [playerPhotoTouched, setPlayerPhotoTouched] = useState(false);
   const [playerPriorityGroupDraftId, setPlayerPriorityGroupDraftId] = useState<string | null>(null);
-  // positionId → rating draft string; chave presente = posição marcada como favorita
-  const [playerPositionDrafts, setPlayerPositionDrafts] = useState<Record<string, string>>({});
+  // positionId → { rating, classification }; chave presente = posição marcada
+  const [playerPositionDrafts, setPlayerPositionDrafts] = useState<
+    Record<string, { rating: string; classification: PositionClassification | null }>
+  >({});
   const [playerBirthDateDraft, setPlayerBirthDateDraft] = useState("");
   const [playerRatingDraft, setPlayerRatingDraft] = useState("");
   const [playerDominantSideDraft, setPlayerDominantSideDraft] = useState<DominantSide | null>(null);
@@ -471,7 +473,10 @@ export default function RosterScreen() {
       Object.fromEntries(
         item.preferredPositions.map((pos) => [
           pos.id,
-          pos.positionRating !== null ? pos.positionRating.toFixed(2) : "",
+          {
+            rating: pos.positionRating !== null ? pos.positionRating.toFixed(2) : "",
+            classification: pos.classification,
+          },
         ]),
       ),
     );
@@ -524,18 +529,29 @@ export default function RosterScreen() {
         delete next[positionId];
         return next;
       }
-      return { ...current, [positionId]: "" };
+      return { ...current, [positionId]: { rating: "", classification: "principal" } };
     });
   }
 
   function setPositionRatingDraft(positionId: string, value: string) {
-    setPlayerPositionDrafts((current) => ({ ...current, [positionId]: value }));
+    setPlayerPositionDrafts((current) => ({
+      ...current,
+      [positionId]: { ...current[positionId], rating: value },
+    }));
+  }
+
+  function setPositionClassification(positionId: string, value: PositionClassification) {
+    setPlayerPositionDrafts((current) => ({
+      ...current,
+      [positionId]: { ...current[positionId], classification: value },
+    }));
   }
 
   function buildPreferredPositions(): PlayerPositionInput[] {
-    return Object.entries(playerPositionDrafts).map(([positionId, ratingStr]) => ({
+    return Object.entries(playerPositionDrafts).map(([positionId, draft]) => ({
       positionId,
-      rating: ratingStr.trim() ? (parseOptionalPlayerRating(ratingStr) ?? null) : null,
+      rating: draft.rating.trim() ? (parseOptionalPlayerRating(draft.rating) ?? null) : null,
+      classification: draft.classification,
     }));
   }
 
@@ -1177,7 +1193,8 @@ export default function RosterScreen() {
                     </Text>
                     {modalityPositions.map((position) => {
                       const isSelected = position.id in playerPositionDrafts;
-                      const ratingDraft = playerPositionDrafts[position.id] ?? "";
+                      const draft = playerPositionDrafts[position.id];
+                      const classification = draft?.classification ?? null;
 
                       return (
                         <View key={position.id} style={positionRatingStyles.row}>
@@ -1189,14 +1206,38 @@ export default function RosterScreen() {
                             </Text>
                           </Pressable>
                           {isSelected && (
-                            <TextInput
-                              value={ratingDraft}
-                              onChangeText={(value) => setPositionRatingDraft(position.id, value)}
-                              placeholder="Nota"
-                              keyboardType="decimal-pad"
-                              style={positionRatingStyles.ratingInput}
-                              placeholderTextColor={Colors.textMuted}
-                            />
+                            <>
+                              <TextInput
+                                value={draft?.rating ?? ""}
+                                onChangeText={(value) => setPositionRatingDraft(position.id, value)}
+                                placeholder="Nota"
+                                keyboardType="decimal-pad"
+                                style={positionRatingStyles.ratingInput}
+                                placeholderTextColor={Colors.textMuted}
+                              />
+                              {(["principal", "secondary", "improviso"] as PositionClassification[]).map((cls) => {
+                                const activeStyle =
+                                  cls === "principal" ? positionRatingStyles.classBtnActive_principal
+                                  : cls === "secondary" ? positionRatingStyles.classBtnActive_secondary
+                                  : positionRatingStyles.classBtnActive_improviso;
+                                return (
+                                  <Pressable
+                                    key={cls}
+                                    onPress={() => setPositionClassification(position.id, cls)}
+                                    style={[
+                                      positionRatingStyles.classificationBtn,
+                                      classification === cls && activeStyle,
+                                    ]}>
+                                    <Text style={[
+                                      positionRatingStyles.classificationBtnText,
+                                      classification === cls && positionRatingStyles.classificationBtnTextActive,
+                                    ]}>
+                                      {cls === "principal" ? "P" : cls === "secondary" ? "S" : "I"}
+                                    </Text>
+                                  </Pressable>
+                                );
+                              })}
+                            </>
                           )}
                         </View>
                       );
@@ -1589,15 +1630,46 @@ const positionRatingStyles = StyleSheet.create({
     color: "#ffffff",
   },
   ratingInput: {
-    flex: 1,
+    width: 56,
     borderWidth: 1,
     borderColor: Colors.border,
     borderRadius: 8,
-    paddingHorizontal: 12,
+    paddingHorizontal: 8,
     paddingVertical: 8,
     fontSize: 14,
     color: Colors.text,
     backgroundColor: Colors.surface,
+    textAlign: "center",
+  },
+  classificationBtn: {
+    width: 30,
+    height: 32,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    backgroundColor: Colors.surface,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  classBtnActive_principal: {
+    backgroundColor: Colors.success,
+    borderColor: Colors.success,
+  },
+  classBtnActive_secondary: {
+    backgroundColor: Colors.warning,
+    borderColor: Colors.warning,
+  },
+  classBtnActive_improviso: {
+    backgroundColor: Colors.danger,
+    borderColor: Colors.danger,
+  },
+  classificationBtnText: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: Colors.textMuted,
+  },
+  classificationBtnTextActive: {
+    color: "#ffffff",
   },
 });
 

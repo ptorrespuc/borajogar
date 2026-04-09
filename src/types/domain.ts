@@ -137,17 +137,21 @@ export type AccountPlayer = {
   updated_at: string;
 };
 
+export type PositionClassification = "principal" | "secondary" | "improviso";
+
 export type AccountPlayerPositionPreference = {
   id: string;
   account_player_id: string;
   modality_position_id: string;
   preference_order: number;
   rating: number | null;
+  classification: PositionClassification | null;
   created_at: string;
 };
 
 export type ModalityPositionWithRating = ModalityPosition & {
   positionRating: number | null;
+  classification: PositionClassification | null;
 };
 
 export type MembershipPositionPreference = {
