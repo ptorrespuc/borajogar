@@ -467,6 +467,89 @@ function buildSlotAssignmentsFromPositions(
   return result;
 }
 
+/**
+ * Atribui jogadores a slots do campo usando as notas por posição.
+ * Prioriza a posição em que cada jogador tem maior nota; jogadores sem
+ * nota por posição preenchem os slots restantes.
+ * Não altera a composição dos times — apenas posiciona no campo.
+ */
+function buildSlotAssignmentsFromRatings(
+  playerIds: string[],
+  formation: TacticalFormation | null,
+  participants: WeeklyEventParticipantItem[],
+): { slotAssignments: SlotAssignment[]; assignedPositionIds: Record<string, string> } {
+  if (!formation || formation.slots.length === 0) {
+    return { slotAssignments: [], assignedPositionIds: {} };
+  }
+
+  const participantMap = new Map(participants.map((p) => [p.player.id, p]));
+
+  // Slots disponíveis por posição (cópia mutável; ignora slots sem posição definida)
+  const remainingSlotsByPosition = new Map<string, TacticalFormationSlot[]>();
+  for (const slot of formation.slots) {
+    if (!slot.modality_position_id) continue;
+    const list = remainingSlotsByPosition.get(slot.modality_position_id) ?? [];
+    list.push(slot);
+    remainingSlotsByPosition.set(slot.modality_position_id, list);
+  }
+
+  const assignedPlayerIds = new Set<string>();
+  const resultSlots: SlotAssignment[] = [];
+  const resultPositions: Record<string, string> = {};
+
+  // Fase 1: candidatos com nota por posição — ordenados por nota decrescente
+  type RatedCandidate = { playerId: string; positionId: string; rating: number };
+  const ratedCandidates: RatedCandidate[] = [];
+
+  for (const playerId of playerIds) {
+    const participant = participantMap.get(playerId);
+    if (!participant) continue;
+
+    for (const pos of participant.preferredPositions) {
+      if (pos.positionRating === null) continue; // só considera quem tem nota definida
+      if (!remainingSlotsByPosition.has(pos.id)) continue; // posição não está nesta formação
+      ratedCandidates.push({ playerId, positionId: pos.id, rating: pos.positionRating });
+    }
+  }
+
+  ratedCandidates.sort((a, b) => b.rating - a.rating);
+
+  for (const { playerId, positionId } of ratedCandidates) {
+    if (assignedPlayerIds.has(playerId)) continue;
+    const slots = remainingSlotsByPosition.get(positionId);
+    if (!slots || slots.length === 0) continue;
+
+    const slot = slots.shift()!;
+    const participant = participantMap.get(playerId)!;
+    assignedPlayerIds.add(playerId);
+    resultSlots.push({ slotId: slot.id, playerId, playerName: participant.player.full_name });
+    resultPositions[playerId] = positionId;
+  }
+
+  // Fase 2: jogadores restantes — preenchem slots que sobram, na ordem da formação
+  const remainingSlotsList: TacticalFormationSlot[] = [];
+  for (const slots of remainingSlotsByPosition.values()) {
+    remainingSlotsList.push(...slots);
+  }
+
+  for (const playerId of playerIds) {
+    if (assignedPlayerIds.has(playerId)) continue;
+    const participant = participantMap.get(playerId);
+    if (!participant) continue;
+
+    const slot = remainingSlotsList.shift();
+    if (!slot) break;
+
+    assignedPlayerIds.add(playerId);
+    resultSlots.push({ slotId: slot.id, playerId, playerName: participant.player.full_name });
+    if (slot.modality_position_id) {
+      resultPositions[playerId] = slot.modality_position_id;
+    }
+  }
+
+  return { slotAssignments: resultSlots, assignedPositionIds: resultPositions };
+}
+
 function autoGenerateMatchTeamsByPositions(input: {
   selectedPlayerIds: string[];
   participants: WeeklyEventParticipantItem[];
@@ -1686,10 +1769,24 @@ export default function EventsScreen() {
     const balancedTeams = balanceMatchTeams(selectedIds, activeParticipants);
     setMatchHomePlayerIds(balancedTeams.homePlayerIds);
     setMatchAwayPlayerIds(balancedTeams.awayPlayerIds);
-    setMatchAssignedPositionIds({});
-    // Sem posições atribuídas — limpa os slots do campo
-    setHomeSlotAssignments([]);
-    setAwaySlotAssignments([]);
+
+    // Após distribuir os times, atribui jogadores a posições no campo
+    // usando as notas por posição de cada jogador
+    const homeFormation = tacticalFormations.find((f) => f.id === homeFormationId) ?? null;
+    const awayFormation = tacticalFormations.find((f) => f.id === awayFormationId) ?? null;
+    const homeAssignment = buildSlotAssignmentsFromRatings(
+      balancedTeams.homePlayerIds, homeFormation, activeParticipants,
+    );
+    const awayAssignment = buildSlotAssignmentsFromRatings(
+      balancedTeams.awayPlayerIds, awayFormation, activeParticipants,
+    );
+    setHomeSlotAssignments(homeAssignment.slotAssignments);
+    setAwaySlotAssignments(awayAssignment.slotAssignments);
+    setMatchAssignedPositionIds({
+      ...homeAssignment.assignedPositionIds,
+      ...awayAssignment.assignedPositionIds,
+    });
+
     setMessage({
       tone: "success",
       text: `Times balanceados pela nota: ${balancedTeams.homeRating.toFixed(2)} x ${balancedTeams.awayRating.toFixed(2)}.`,
