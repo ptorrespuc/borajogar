@@ -2313,10 +2313,10 @@ export default function EventsScreen() {
               })()}
             </View>
 
-            {/* Ação admin de estado (só no evento ativo) */}
-            {isViewingActiveEvent && canManageWeeklyList ? (
+            {/* Ações admin do evento ativo */}
+            {isViewingActiveEvent && canManageWeeklyList && activeEventItem ? (
               <View style={newStyles.adminRow}>
-                {activeEventItem?.event.status === "draft" ? (
+                {activeEventItem.event.status === "draft" ? (
                   <Pressable
                     onPress={() => confirmCloseList(activeEventItem.event.id)}
                     disabled={eventActionId === `close-${activeEventItem.event.id}`}
@@ -2325,7 +2325,7 @@ export default function EventsScreen() {
                       {eventActionId === `close-${activeEventItem.event.id}` ? "Fechando lista…" : "Fechar lista"}
                     </Text>
                   </Pressable>
-                ) : activeEventItem?.event.status === "published" ? (
+                ) : activeEventItem.event.status === "published" ? (
                   <Pressable
                     onPress={() => confirmCompleteEvent(activeEventItem.event.id)}
                     disabled={eventActionId === `complete-${activeEventItem.event.id}`}
@@ -2338,6 +2338,20 @@ export default function EventsScreen() {
               </View>
             ) : null}
           </>
+        ) : null}
+
+        {/* Criar novo evento — visível no header quando admin e não há evento ativo */}
+        {!activeEventItem && canManageWeeklyList ? (
+          <View style={newStyles.adminRow}>
+            <Pressable
+              onPress={() => void handleCreateWeeklyEvent()}
+              disabled={isCreatingEvent}
+              style={[newStyles.adminBtn, isCreatingEvent && newStyles.adminBtnDisabled]}>
+              <Text style={newStyles.adminBtnText}>
+                {isCreatingEvent ? "Criando evento…" : "＋ Criar novo evento"}
+              </Text>
+            </Pressable>
+          </View>
         ) : null}
 
         {/* Tab bar */}
