@@ -1439,9 +1439,11 @@ export default function RosterScreen() {
                         Posicoes:{" "}
                         {currentPlayer.preferredPositions.length > 0
                           ? currentPlayer.preferredPositions
-                              .map((pos) =>
-                                pos.positionRating !== null ? `${pos.name} ${pos.positionRating.toFixed(1)}` : pos.name,
-                              )
+                              .map((pos) => {
+                                const cls = pos.classification === "principal" ? "P" : pos.classification === "secondary" ? "S" : pos.classification === "improviso" ? "I" : null;
+                                const nota = pos.positionRating !== null ? ` ${pos.positionRating.toFixed(1)}` : "";
+                                return cls ? `${pos.name}${nota} (${cls})` : `${pos.name}${nota}`;
+                              })
                               .join(" · ")
                           : "Nao informadas"}
                       </Text>
@@ -1532,9 +1534,11 @@ export default function RosterScreen() {
                         Posicoes:{" "}
                         {item.preferredPositions.length > 0
                           ? item.preferredPositions
-                              .map((pos) =>
-                                pos.positionRating !== null ? `${pos.name} ${pos.positionRating.toFixed(1)}` : pos.name,
-                              )
+                              .map((pos) => {
+                                const cls = pos.classification === "principal" ? "P" : pos.classification === "secondary" ? "S" : pos.classification === "improviso" ? "I" : null;
+                                const nota = pos.positionRating !== null ? ` ${pos.positionRating.toFixed(1)}` : "";
+                                return cls ? `${pos.name}${nota} (${cls})` : `${pos.name}${nota}`;
+                              })
                               .join(" · ")
                           : "Nao informadas"}
                       </Text>
