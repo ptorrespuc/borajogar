@@ -586,6 +586,16 @@ function buildSlotAssignmentsFromRatings(
   return { slotAssignments: resultSlots, assignedPositionIds: resultPositions };
 }
 
+/**
+ * Monta dois times equilibrados seguindo a especificação de heurística em 7 passos:
+ *
+ * 1. Calcular escassez por posição (oferta - demanda) e ordenar vagas da mais crítica para menos crítica.
+ * 2. Gerar lista de vagas na ordem de escassez.
+ * 3. Alocação estrutural: para cada vaga, escolher o melhor candidato disponível por prioridade:
+ *    aptidão → flexibilidade → impacto estrutural → nota na posição → id.
+ * 4. Distribuição entre times por posição: ordenar por nota desc e alternar para minimizar diferença.
+ * 5. Refinamento: trocas entre times enquanto reduzir diferença sem aumentar improvisos.
+ */
 function autoGenerateMatchTeamsByPositions(input: {
   selectedPlayerIds: string[];
   participants: WeeklyEventParticipantItem[];
@@ -611,169 +621,164 @@ function autoGenerateMatchTeamsByPositions(input: {
   const participantMap = new Map(
     input.participants.map((participant, index) => [participant.player.id, { participant, order: index }]),
   );
-  const formationPositionIds = selectedFormation.map((item) => item.position.id);
-  const selectedPlayers = uniqueSelectedPlayerIds
+
+  // aptidão numérica: 0 = Principal, 1 = Secundária, 2 = Improviso
+  const aptidaoOrder = { principal: 0 as const, secondary: 1 as const, improviso: 2 as const };
+
+  type PosEntry = {
+    positionId: string;
+    positionRating: number;
+    aptidao: 0 | 1 | 2;
+  };
+  type PlayerData = {
+    id: string;
+    order: number;
+    generalRating: number;
+    // apenas posições que existem na formação escolhida
+    formationPositions: PosEntry[];
+  };
+
+  const formationPositionIdSet = new Set(selectedFormation.map((item) => item.position.id));
+
+  const players: PlayerData[] = uniqueSelectedPlayerIds
     .map((playerId) => {
       const entry = participantMap.get(playerId);
+      if (!entry) return null;
 
-      if (!entry) {
-        return null;
-      }
-
-      // Mapa de nota por posição (positionId → rating)
-      const positionRatingMap = new Map(
-        entry.participant.preferredPositions.map((pos) => [pos.id, pos.positionRating]),
-      );
+      const formationPositions: PosEntry[] = entry.participant.preferredPositions
+        .filter((pos) => formationPositionIdSet.has(pos.id))
+        .map((pos) => ({
+          positionId: pos.id,
+          positionRating: pos.positionRating ?? getBalanceRating(entry.participant.player.rating),
+          aptidao: pos.classification != null ? aptidaoOrder[pos.classification] : 2,
+        }));
 
       return {
         id: playerId,
         order: entry.order,
-        rating: getBalanceRating(entry.participant.player.rating),
-        positionRatingMap,
-        preferredPositionIds: entry.participant.preferredPositions
-          .map((position) => position.id)
-          .filter((positionId) => formationPositionIds.includes(positionId)),
+        generalRating: getBalanceRating(entry.participant.player.rating),
+        formationPositions,
       };
     })
-    .filter(
-      (
-        item,
-      ): item is {
-        id: string;
-        order: number;
-        rating: number;
-        positionRatingMap: Map<string, number | null>;
-        preferredPositionIds: string[];
-      } => item !== null,
-    );
+    .filter((p): p is PlayerData => p !== null);
 
-  const remainingSlots = new Map<string, number>(
-    selectedFormation.map((item) => [item.position.id, item.countPerTeam * 2]),
+  // ── PASSO 1: Calcular escassez ────────────────────────────────────────────
+  // Para cada posição: oferta = jogadores aptos, demanda = vagas totais (formação × 2 times)
+  const formationWithScarcity = selectedFormation
+    .map(({ position, countPerTeam }) => {
+      const demand = countPerTeam * 2;
+      const supply = players.filter((p) =>
+        p.formationPositions.some((pos) => pos.positionId === position.id),
+      ).length;
+      return { position, countPerTeam, demand, supply, slack: supply - demand };
+    })
+    .sort((a, b) => {
+      // menor folga → mais crítica; empate: menor oferta; empate: maior demanda
+      if (a.slack !== b.slack) return a.slack - b.slack;
+      if (a.supply !== b.supply) return a.supply - b.supply;
+      return b.demand - a.demand;
+    });
+
+  // Posições críticas: folga ≤ 1 (usadas no critério de impacto estrutural)
+  const criticalPositionIds = new Set(
+    formationWithScarcity.filter((p) => p.slack <= 1).map((p) => p.position.id),
   );
-  const assignedPositionIds = new Map<string, string>();
 
-  function getAvailableOptions(
-    player: {
-      id: string;
-      preferredPositionIds: string[];
-    },
-    unassignedPlayers: typeof selectedPlayers,
-  ) {
-    const preferredOptions = player.preferredPositionIds.filter(
-      (positionId) => (remainingSlots.get(positionId) ?? 0) > 0,
-    );
-
-    if (preferredOptions.length > 0) {
-      return preferredOptions.sort((first, second) => {
-        const firstEligible = unassignedPlayers.filter((candidate) =>
-          candidate.preferredPositionIds.includes(first),
-        ).length;
-        const secondEligible = unassignedPlayers.filter((candidate) =>
-          candidate.preferredPositionIds.includes(second),
-        ).length;
-        const firstRemaining = remainingSlots.get(first) ?? 0;
-        const secondRemaining = remainingSlots.get(second) ?? 0;
-
-        const firstScarcity = firstEligible - firstRemaining;
-        const secondScarcity = secondEligible - secondRemaining;
-
-        if (firstScarcity !== secondScarcity) {
-          return firstScarcity - secondScarcity;
-        }
-
-        return (
-          player.preferredPositionIds.indexOf(first) - player.preferredPositionIds.indexOf(second)
-        );
-      });
+  // ── PASSO 2: Gerar lista de vagas ordenada por escassez ──────────────────
+  const slotQueue: { positionId: string }[] = [];
+  for (const { position, countPerTeam } of formationWithScarcity) {
+    for (let i = 0; i < countPerTeam * 2; i++) {
+      slotQueue.push({ positionId: position.id });
     }
-
-    return selectedFormation
-      .map((item) => item.position.id)
-      .filter((positionId) => (remainingSlots.get(positionId) ?? 0) > 0)
-      .sort((first, second) => {
-        const firstRemaining = remainingSlots.get(first) ?? 0;
-        const secondRemaining = remainingSlots.get(second) ?? 0;
-
-        if (firstRemaining !== secondRemaining) {
-          return secondRemaining - firstRemaining;
-        }
-
-        const firstEligible = unassignedPlayers.filter((candidate) =>
-          candidate.preferredPositionIds.includes(first),
-        ).length;
-        const secondEligible = unassignedPlayers.filter((candidate) =>
-          candidate.preferredPositionIds.includes(second),
-        ).length;
-
-        return firstEligible - secondEligible;
-      });
   }
 
-  function assignPositions(unassignedPlayers: typeof selectedPlayers): boolean {
-    if (unassignedPlayers.length === 0) {
-      return [...remainingSlots.values()].every((value) => value === 0);
+  // ── PASSO 3: Alocação estrutural (greedy) ────────────────────────────────
+  const assignedPositionMap = new Map<string, string>(); // playerId → positionId
+  const assignedPlayerSet = new Set<string>();
+  const remainingSlotCount = new Map<string, number>(
+    formationWithScarcity.map(({ position, countPerTeam }) => [position.id, countPerTeam * 2]),
+  );
+
+  for (const { positionId } of slotQueue) {
+    // Candidatos: não atribuídos e que têm esta posição na formação
+    let candidates = players.filter(
+      (p) =>
+        !assignedPlayerSet.has(p.id) &&
+        p.formationPositions.some((pos) => pos.positionId === positionId),
+    );
+
+    // Regra fundamental: só usa aptidão 2 (improviso) se não houver 0 ou 1 disponível
+    const hasPrincipalOrSecondary = candidates.some((p) =>
+      p.formationPositions.find((pos) => pos.positionId === positionId && pos.aptidao < 2),
+    );
+    if (hasPrincipalOrSecondary) {
+      candidates = candidates.filter((p) =>
+        p.formationPositions.find((pos) => pos.positionId === positionId && pos.aptidao < 2),
+      );
     }
 
-    const nextPlayer = [...unassignedPlayers]
-      .map((player) => ({
-        player,
-        options: getAvailableOptions(player, unassignedPlayers),
-      }))
-      .sort((first, second) => {
-        if (first.options.length !== second.options.length) {
-          return first.options.length - second.options.length;
-        }
-
-        if (second.player.preferredPositionIds.length !== first.player.preferredPositionIds.length) {
-          return second.player.preferredPositionIds.length - first.player.preferredPositionIds.length;
-        }
-
-        if (second.player.rating !== first.player.rating) {
-          return second.player.rating - first.player.rating;
-        }
-
-        return first.player.order - second.player.order;
-      })[0];
-
-    if (!nextPlayer || nextPlayer.options.length === 0) {
-      return false;
+    if (candidates.length === 0) {
+      // Sem candidatos: usa qualquer jogador não atribuído (improviso total)
+      candidates = players.filter((p) => !assignedPlayerSet.has(p.id));
     }
 
-    const remainingPlayers = unassignedPlayers.filter((player) => player.id !== nextPlayer.player.id);
+    candidates.sort((a, b) => {
+      const aPosData = a.formationPositions.find((pos) => pos.positionId === positionId);
+      const bPosData = b.formationPositions.find((pos) => pos.positionId === positionId);
 
-    for (const positionId of nextPlayer.options) {
-      remainingSlots.set(positionId, (remainingSlots.get(positionId) ?? 0) - 1);
-      assignedPositionIds.set(nextPlayer.player.id, positionId);
+      // 1. Aptidão (menor = melhor)
+      const aApt = aPosData?.aptidao ?? 2;
+      const bApt = bPosData?.aptidao ?? 2;
+      if (aApt !== bApt) return aApt - bApt;
 
-      if (assignPositions(remainingPlayers)) {
-        return true;
+      // 2. Flexibilidade: menos posições na formação = prioridade (preserva versáteis)
+      if (a.formationPositions.length !== b.formationPositions.length)
+        return a.formationPositions.length - b.formationPositions.length;
+
+      // 3. Impacto estrutural: menos posições críticas cobertas = menor impacto = prioridade
+      const aImpact = a.formationPositions.filter((pos) => criticalPositionIds.has(pos.positionId)).length;
+      const bImpact = b.formationPositions.filter((pos) => criticalPositionIds.has(pos.positionId)).length;
+      if (aImpact !== bImpact) return aImpact - bImpact;
+
+      // 4. Nota na posição (maior = melhor)
+      const aRating = aPosData?.positionRating ?? a.generalRating;
+      const bRating = bPosData?.positionRating ?? b.generalRating;
+      if (bRating !== aRating) return bRating - aRating;
+
+      // 5. ID (desempate determinístico)
+      return a.id.localeCompare(b.id);
+    });
+
+    const selected = candidates[0];
+    if (!selected) continue;
+
+    assignedPositionMap.set(selected.id, positionId);
+    assignedPlayerSet.add(selected.id);
+    remainingSlotCount.set(positionId, (remainingSlotCount.get(positionId) ?? 0) - 1);
+  }
+
+  // Jogadores que não foram atribuídos (edge case): encher slots restantes
+  for (const player of players) {
+    if (assignedPlayerSet.has(player.id)) continue;
+    for (const [positionId, count] of remainingSlotCount.entries()) {
+      if (count > 0) {
+        assignedPositionMap.set(player.id, positionId);
+        assignedPlayerSet.add(player.id);
+        remainingSlotCount.set(positionId, count - 1);
+        break;
       }
-
-      assignedPositionIds.delete(nextPlayer.player.id);
-      remainingSlots.set(positionId, (remainingSlots.get(positionId) ?? 0) + 1);
     }
-
-    return false;
   }
 
-  if (!assignPositions(selectedPlayers)) {
-    throw new Error(
-      "Nao foi possivel distribuir todos os jogadores nas posicoes escolhidas. Revise as posicoes favoritas ou ajuste a formacao.",
-    );
-  }
-
-  const assignedPlayersByPosition = new Map<string, typeof selectedPlayers>();
-
-  for (const player of selectedPlayers) {
-    const positionId = assignedPositionIds.get(player.id);
-
-    if (!positionId) {
-      continue;
-    }
-
-    const current = assignedPlayersByPosition.get(positionId) ?? [];
-    current.push(player);
-    assignedPlayersByPosition.set(positionId, current);
+  // ── PASSO 4: Distribuição entre times por posição ────────────────────────
+  // Para cada posição: ordenar jogadores por nota desc e alternar home/away
+  const playersByPosition = new Map<string, PlayerData[]>();
+  for (const player of players) {
+    const positionId = assignedPositionMap.get(player.id);
+    if (!positionId) continue;
+    const list = playersByPosition.get(positionId) ?? [];
+    list.push(player);
+    playersByPosition.set(positionId, list);
   }
 
   const homePlayerIds: string[] = [];
@@ -781,48 +786,110 @@ function autoGenerateMatchTeamsByPositions(input: {
   let homeRating = 0;
   let awayRating = 0;
 
-  for (const { position, countPerTeam } of selectedFormation) {
-    const candidates = [...(assignedPlayersByPosition.get(position.id) ?? [])].sort((first, second) => {
-      // Usa nota específica da posição quando disponível, senão nota geral
-      const firstEffective = first.positionRatingMap.get(position.id) ?? first.rating;
-      const secondEffective = second.positionRatingMap.get(position.id) ?? second.rating;
-      if (secondEffective !== firstEffective) {
-        return secondEffective - firstEffective;
-      }
-      return first.order - second.order;
+  // Função auxiliar: nota efetiva do jogador na posição atribuída
+  function effectiveRating(player: PlayerData, positionId: string): number {
+    return player.formationPositions.find((pos) => pos.positionId === positionId)?.positionRating ?? player.generalRating;
+  }
+
+  for (const { position, countPerTeam } of formationWithScarcity) {
+    const candidates = [...(playersByPosition.get(position.id) ?? [])].sort((a, b) => {
+      const aR = effectiveRating(a, position.id);
+      const bR = effectiveRating(b, position.id);
+      if (bR !== aR) return bR - aR;
+      return a.order - b.order;
     });
 
     let homeRemaining = countPerTeam;
     let awayRemaining = countPerTeam;
 
     for (const candidate of candidates) {
-      const effectiveRating = candidate.positionRatingMap.get(position.id) ?? candidate.rating;
+      const rating = effectiveRating(candidate, position.id);
       const shouldUseHome =
         awayRemaining === 0
           ? true
           : homeRemaining === 0
             ? false
-            : homeRating === awayRating
-              ? homePlayerIds.length <= awayPlayerIds.length
-              : homeRating < awayRating;
+            : homeRating < awayRating || (homeRating === awayRating && homePlayerIds.length <= awayPlayerIds.length);
 
       if (shouldUseHome) {
         homePlayerIds.push(candidate.id);
-        homeRating += effectiveRating;
+        homeRating += rating;
         homeRemaining -= 1;
-        continue;
+      } else {
+        awayPlayerIds.push(candidate.id);
+        awayRating += rating;
+        awayRemaining -= 1;
       }
+    }
+  }
 
-      awayPlayerIds.push(candidate.id);
-      awayRating += effectiveRating;
-      awayRemaining -= 1;
+  // ── PASSO 5: Refinamento por trocas ─────────────────────────────────────
+  // Troca jogadores entre times enquanto reduzir diferença sem aumentar improvisos.
+  // Uma troca é: home[i] ↔ away[j] (ambos mantêm a posição atribuída, só trocam de time).
+
+  function playerImproviso(playerId: string): boolean {
+    const posId = assignedPositionMap.get(playerId);
+    const player = players.find((p) => p.id === playerId);
+    if (!player || !posId) return true;
+    const posData = player.formationPositions.find((pos) => pos.positionId === posId);
+    return !posData || posData.aptidao === 2;
+  }
+
+  const totalImprovisos =
+    homePlayerIds.filter(playerImproviso).length + awayPlayerIds.filter(playerImproviso).length;
+
+  let improved = true;
+  const MAX_ITER = 100;
+  let iter = 0;
+
+  while (improved && iter < MAX_ITER) {
+    improved = false;
+    iter++;
+
+    for (let i = 0; i < homePlayerIds.length && !improved; i++) {
+      for (let j = 0; j < awayPlayerIds.length && !improved; j++) {
+        const hId = homePlayerIds[i];
+        const aId = awayPlayerIds[j];
+        const hPosId = assignedPositionMap.get(hId)!;
+        const aPosId = assignedPositionMap.get(aId)!;
+
+        const hPlayer = players.find((p) => p.id === hId);
+        const aPlayer = players.find((p) => p.id === aId);
+        if (!hPlayer || !aPlayer) continue;
+
+        const hRating = effectiveRating(hPlayer, hPosId);
+        const aRating = effectiveRating(aPlayer, aPosId);
+
+        const newHomeRating = homeRating - hRating + aRating;
+        const newAwayRating = awayRating - aRating + hRating;
+        const newDiff = Math.abs(newHomeRating - newAwayRating);
+        const currentDiff = Math.abs(homeRating - awayRating);
+
+        if (newDiff >= currentDiff) continue;
+
+        // Verificar improvisos após a troca (jogadores mantêm posição, só mudam de time)
+        const newHomeIds = [...homePlayerIds];
+        const newAwayIds = [...awayPlayerIds];
+        newHomeIds[i] = aId;
+        newAwayIds[j] = hId;
+        const newImprovisos =
+          newHomeIds.filter(playerImproviso).length + newAwayIds.filter(playerImproviso).length;
+
+        if (newImprovisos > totalImprovisos) continue;
+
+        homePlayerIds[i] = aId;
+        awayPlayerIds[j] = hId;
+        homeRating = newHomeRating;
+        awayRating = newAwayRating;
+        improved = true;
+      }
     }
   }
 
   return {
     homePlayerIds,
     awayPlayerIds,
-    assignedPositionIds: Object.fromEntries(assignedPositionIds.entries()),
+    assignedPositionIds: Object.fromEntries(assignedPositionMap.entries()),
     homeRating: Number(homeRating.toFixed(2)),
     awayRating: Number(awayRating.toFixed(2)),
   };
