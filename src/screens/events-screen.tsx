@@ -1672,51 +1672,7 @@ export default function EventsScreen() {
       return;
     }
 
-    const selectedFormation = getSelectedFormationPositions(modalityPositions, matchFormationCounts);
-    const playersPerTeamTarget = selectedFormation.reduce((total, item) => total + item.countPerTeam, 0);
-    const requiredSelectedCount = playersPerTeamTarget * 2;
-
-    if (selectedFormation.length > 0) {
-      if (selectedIds.length !== requiredSelectedCount) {
-        setMessage({
-          tone: "error",
-          text: `Para balancear respeitando a formacao, selecione exatamente ${requiredSelectedCount} jogadores.`,
-        });
-        return;
-      }
-
-      try {
-        const generatedTeams = autoGenerateMatchTeamsByPositions({
-          selectedPlayerIds: selectedIds,
-          participants: activeParticipants,
-          positions: modalityPositions,
-          formationCounts: matchFormationCounts,
-        });
-
-        setMatchHomePlayerIds(generatedTeams.homePlayerIds);
-        setMatchAwayPlayerIds(generatedTeams.awayPlayerIds);
-        setMatchAssignedPositionIds(generatedTeams.assignedPositionIds);
-
-        // Sincroniza os slots do campo tático com as posições atribuídas
-        const homeFormation = tacticalFormations.find((f) => f.id === homeFormationId) ?? null;
-        const awayFormation = tacticalFormations.find((f) => f.id === awayFormationId) ?? null;
-        setHomeSlotAssignments(
-          buildSlotAssignmentsFromPositions(generatedTeams.homePlayerIds, generatedTeams.assignedPositionIds, homeFormation, activeParticipants),
-        );
-        setAwaySlotAssignments(
-          buildSlotAssignmentsFromPositions(generatedTeams.awayPlayerIds, generatedTeams.assignedPositionIds, awayFormation, activeParticipants),
-        );
-
-        setMessage({
-          tone: "success",
-          text: `Times balanceados com posicoes e nota: ${generatedTeams.homeRating.toFixed(2)} x ${generatedTeams.awayRating.toFixed(2)}.`,
-        });
-      } catch (generationError) {
-        setMessage({ tone: "error", text: getReadableError(generationError) });
-      }
-      return;
-    }
-
+    // Balanceamento simples por nota — funciona com qualquer quantidade de jogadores
     const balancedTeams = balanceMatchTeams(selectedIds, activeParticipants);
     setMatchHomePlayerIds(balancedTeams.homePlayerIds);
     setMatchAwayPlayerIds(balancedTeams.awayPlayerIds);
@@ -3315,8 +3271,10 @@ export default function EventsScreen() {
     const requiredSelectedCount = playersPerTeamTarget * 2;
     const selectedCountMatchesFormation =
       playersPerTeamTarget > 0 && selectedParticipants.length === requiredSelectedCount;
-    const canRunRatingBalance =
-      selectedFormation.length > 0 ? selectedCountMatchesFormation : matchSelectedPlayerIds.length >= 2;
+    // "Balancear por nota" só precisa de ≥ 2 jogadores
+    const canRunRatingBalance = matchSelectedPlayerIds.length >= 2;
+    // "Montar 2 times" (por posição) precisa de count exato
+    const canRunFormationBalance = selectedFormation.length > 0 && selectedCountMatchesFormation;
     const unassignedSelectedCount = selectedParticipants.filter(
       (item) =>
         !matchHomePlayerIds.includes(item.player.id) && !matchAwayPlayerIds.includes(item.player.id),
@@ -3401,16 +3359,18 @@ export default function EventsScreen() {
                   </View>
                 ) : null}
 
-                <View style={styles.listActions}>
-                  <Pressable
-                    onPress={handleAutoGenerateMatch}
-                    disabled={!canRunRatingBalance}
-                    style={[styles.secondaryButton, !canRunRatingBalance && styles.buttonDisabled]}>
-                    <Text style={styles.secondaryButtonText}>
-                      {selectedFormation.length > 0 ? "Montar 2 times" : "Balancear por nota"}
-                    </Text>
-                  </Pressable>
-                </View>
+                {selectedFormation.length > 0 && (
+                  <View style={styles.listActions}>
+                    <Pressable
+                      onPress={handleAutoGenerateMatch}
+                      disabled={!canRunFormationBalance}
+                      style={[styles.secondaryButton, !canRunFormationBalance && styles.buttonDisabled]}>
+                      <Text style={styles.secondaryButtonText}>
+                        {`Montar 2 times (${requiredSelectedCount} jog.)`}
+                      </Text>
+                    </Pressable>
+                  </View>
+                )}
 
                 <View style={styles.formSection}>
                   <View style={styles.formSectionHeader}>
@@ -3448,9 +3408,7 @@ export default function EventsScreen() {
                       onPress={handleBalanceSelectedPlayers}
                       disabled={!canRunRatingBalance}
                       style={[styles.secondaryButton, !canRunRatingBalance && styles.buttonDisabled]}>
-                      <Text style={styles.secondaryButtonText}>
-                        {selectedFormation.length > 0 ? "Balancear" : "Balancear por nota"}
-                      </Text>
+                      <Text style={styles.secondaryButtonText}>Balancear por nota</Text>
                     </Pressable>
                   </View>
 
