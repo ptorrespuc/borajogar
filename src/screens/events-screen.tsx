@@ -508,6 +508,17 @@ function buildSlotAssignmentsFromRatings(
   // Ordena prioridade de classificação: principal > secondary > improviso > sem classificação
   const classOrder = { principal: 0, secondary: 1, improviso: 2 };
 
+  // Pré-calcula quantas posições com slot disponível cada jogador tem (para critério de flexibilidade)
+  const matchableCountByPlayer = new Map<string, number>();
+  for (const playerId of playerIds) {
+    const participant = participantMap.get(playerId);
+    if (!participant) continue;
+    const count = participant.preferredPositions.filter(
+      (pos) => pos.positionRating !== null && remainingSlotsByPosition.has(pos.id),
+    ).length;
+    matchableCountByPlayer.set(playerId, count);
+  }
+
   type RatedCandidate = {
     playerId: string;
     positionId: string;
@@ -532,11 +543,16 @@ function buildSlotAssignmentsFromRatings(
     }
   }
 
-  // Ordena: primeiro por classificação (principal > secondary > improviso), depois por nota desc
+  // Ordena: classificação (P>S>I) → flexibilidade asc (menos opções = prioridade) → nota desc
+  // O critério de flexibilidade garante que jogadores com poucas posições (ex: Alê só joga CA)
+  // recebam o slot antes de jogadores versáteis que poderiam jogar em outra posição.
   ratedCandidates.sort((a, b) => {
     const clsA = a.classification != null ? classOrder[a.classification] : 3;
     const clsB = b.classification != null ? classOrder[b.classification] : 3;
     if (clsA !== clsB) return clsA - clsB;
+    const flexA = matchableCountByPlayer.get(a.playerId) ?? 0;
+    const flexB = matchableCountByPlayer.get(b.playerId) ?? 0;
+    if (flexA !== flexB) return flexA - flexB; // menos flexível tem prioridade
     return b.rating - a.rating;
   });
 
