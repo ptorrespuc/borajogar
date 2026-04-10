@@ -2331,6 +2331,8 @@ export async function createWeeklyEventCall(input: {
   schedule: AccountSchedule;
   priorityGroups: AccountPriorityGroup[];
   createdBy: string;
+  /** Data customizada para o evento (YYYY-MM-DD). Se omitida, usa o próximo dia da semana configurado. */
+  overrideDate?: string;
 }) {
   const existingEvent = await getCurrentWeeklyEvent(input.account.id);
 
@@ -2338,16 +2340,20 @@ export async function createWeeklyEventCall(input: {
     throw new Error("Ja existe uma chamada semanal aberta para essa conta.");
   }
 
-  const { startsAt, endsAt } = getNextScheduleWindow(input.schedule);
-  const confirmationOpensAt = new Date(startsAt);
-  confirmationOpensAt.setHours(
-    confirmationOpensAt.getHours() - input.account.confirmation_open_hours_before,
-  );
+  let { startsAt, endsAt } = getNextScheduleWindow(input.schedule);
 
-  const confirmationClosesAt = new Date(startsAt);
-  confirmationClosesAt.setMinutes(
-    confirmationClosesAt.getMinutes() - input.account.confirmation_close_minutes_before,
-  );
+  // Permite sobrescrever a data mantendo o horário do schedule
+  if (input.overrideDate) {
+    const [year, month, day] = input.overrideDate.split("-").map(Number);
+    startsAt = new Date(startsAt);
+    startsAt.setFullYear(year, month - 1, day);
+    endsAt = new Date(endsAt);
+    endsAt.setFullYear(year, month - 1, day);
+  }
+
+  // Confirmação gerenciada manualmente — abre imediatamente ao criar o evento
+  const confirmationOpensAt = new Date();
+  const confirmationClosesAt = null;
 
   const { data: eventData, error: eventError } = await supabase
     .from("events")
@@ -2358,7 +2364,7 @@ export async function createWeeklyEventCall(input: {
       starts_at: startsAt.toISOString(),
       ends_at: endsAt.toISOString(),
       confirmation_opens_at: confirmationOpensAt.toISOString(),
-      confirmation_closes_at: confirmationClosesAt.toISOString(),
+      confirmation_closes_at: confirmationClosesAt,
       max_players: input.account.max_players_per_event,
       status: "draft",
       created_by: input.createdBy,
@@ -3086,4 +3092,25 @@ export async function replaceMembershipPositionPreferences(
   );
 
   throwIfError(insertError);
+}
+
+/**
+ * Define o esquema tático padrão de uma conta.
+ * Remove is_default de todos os outros esquemas da conta e marca apenas o escolhido.
+ */
+export async function setDefaultTacticalFormation(accountId: string, formationId: string) {
+  const { error: clearError } = await supabase
+    .from("tactical_formations")
+    .update({ is_default: false })
+    .eq("account_id", accountId);
+
+  throwIfError(clearError);
+
+  const { error: setError } = await supabase
+    .from("tactical_formations")
+    .update({ is_default: true })
+    .eq("id", formationId)
+    .eq("account_id", accountId);
+
+  throwIfError(setError);
 }

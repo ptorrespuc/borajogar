@@ -52,6 +52,8 @@ import {
   listModalityPositions,
   listAllSportsAccounts,
   listSportModalities,
+  listTacticalFormations,
+  setDefaultTacticalFormation,
   removePlayerFromWeeklyEvent,
   updateSportModality,
   updateAccountPlayer,
@@ -85,6 +87,7 @@ import type {
   PollTemplate,
   SportModality,
   SportsAccount,
+  TacticalFormation,
 } from "@/src/types/domain";
 
 const roleLabels: Record<AccountRole, string> = {
@@ -453,8 +456,7 @@ export default function HomeScreen() {
 
   const [accountNameDraft, setAccountNameDraft] = useState("");
   const [maxPlayersDraft, setMaxPlayersDraft] = useState("");
-  const [openHoursDraft, setOpenHoursDraft] = useState("");
-  const [closeMinutesDraft, setCloseMinutesDraft] = useState("");
+  const [accountFormations, setAccountFormations] = useState<TacticalFormation[]>([]);
 
   const [createModalityNameDraft, setCreateModalityNameDraft] = useState("");
   const [createModalitySlugDraft, setCreateModalitySlugDraft] = useState("");
@@ -470,8 +472,7 @@ export default function HomeScreen() {
   const [createStartsAt, setCreateStartsAt] = useState("20:30");
   const [createEndsAt, setCreateEndsAt] = useState("22:00");
   const [createMaxPlayers, setCreateMaxPlayers] = useState("20");
-  const [createOpenHours, setCreateOpenHours] = useState("48");
-  const [createCloseMinutes, setCreateCloseMinutes] = useState("120");
+  const [createDefaultFormationId, setCreateDefaultFormationId] = useState<string | null>(null);
   const [priorityGroupDrafts, setPriorityGroupDrafts] = useState<PriorityGroupDraft[]>(() =>
     buildPriorityGroupDrafts(defaultPriorityGroupNames),
   );
@@ -716,15 +717,11 @@ export default function HomeScreen() {
     if (!overview) {
       setAccountNameDraft("");
       setMaxPlayersDraft("");
-      setOpenHoursDraft("");
-      setCloseMinutesDraft("");
       return;
     }
 
     setAccountNameDraft(overview.account.name);
     setMaxPlayersDraft(String(overview.account.max_players_per_event));
-    setOpenHoursDraft(String(overview.account.confirmation_open_hours_before));
-    setCloseMinutesDraft(String(overview.account.confirmation_close_minutes_before));
   }, [overview]);
 
   useEffect(() => {
@@ -1002,8 +999,7 @@ export default function HomeScreen() {
     setCreateStartsAt("20:30");
     setCreateEndsAt("22:00");
     setCreateMaxPlayers("20");
-    setCreateOpenHours("48");
-    setCreateCloseMinutes("120");
+    setCreateDefaultFormationId(null);
     setPriorityGroupDrafts(buildPriorityGroupDrafts(defaultPriorityGroupNames));
   }
 
@@ -1328,8 +1324,9 @@ export default function HomeScreen() {
       setCreateStartsAt(accountOverview.schedules[0]?.starts_at.slice(0, 5) ?? "20:30");
       setCreateEndsAt(accountOverview.schedules[0]?.ends_at.slice(0, 5) ?? "22:00");
       setCreateMaxPlayers(String(accountOverview.account.max_players_per_event));
-      setCreateOpenHours(String(accountOverview.account.confirmation_open_hours_before));
-      setCreateCloseMinutes(String(accountOverview.account.confirmation_close_minutes_before));
+      const formations = await listTacticalFormations(accountId);
+      setAccountFormations(formations);
+      setCreateDefaultFormationId(formations.find((f) => f.is_default)?.id ?? null);
       setPriorityGroupDrafts(
         buildPriorityGroupDrafts(accountOverview.priorityGroups.map((group) => group.name)),
       );
@@ -1463,17 +1460,11 @@ export default function HomeScreen() {
     }
 
     const maxPlayersPerEvent = Number(maxPlayersDraft);
-    const confirmationOpenHoursBefore = Number(openHoursDraft);
-    const confirmationCloseMinutesBefore = Number(closeMinutesDraft);
 
     if (
       !accountNameDraft.trim() ||
       !Number.isInteger(maxPlayersPerEvent) ||
-      maxPlayersPerEvent <= 0 ||
-      !Number.isInteger(confirmationOpenHoursBefore) ||
-      confirmationOpenHoursBefore < 0 ||
-      !Number.isInteger(confirmationCloseMinutesBefore) ||
-      confirmationCloseMinutesBefore < 0
+      maxPlayersPerEvent <= 0
     ) {
       setOverviewError("Revise os campos da conta esportiva.");
       return;
@@ -1487,8 +1478,8 @@ export default function HomeScreen() {
         accountId: overview.account.id,
         name: accountNameDraft.trim(),
         maxPlayersPerEvent,
-        confirmationOpenHoursBefore,
-        confirmationCloseMinutesBefore,
+        confirmationOpenHoursBefore: 0,
+        confirmationCloseMinutesBefore: 0,
       });
 
       setOverview(await getAccountOverview(overview.account.id));
@@ -1509,8 +1500,6 @@ export default function HomeScreen() {
 
     const slug = createSlugDraft.trim() || slugify(createNameDraft);
     const maxPlayersPerEvent = Number(createMaxPlayers);
-    const confirmationOpenHoursBefore = Number(createOpenHours);
-    const confirmationCloseMinutesBefore = Number(createCloseMinutes);
     const weekday = Number(createWeekday);
     const priorityGroups = mapPriorityGroupsForSave(priorityGroupDrafts);
 
@@ -1525,10 +1514,6 @@ export default function HomeScreen() {
       !isValidHourMinute(createEndsAt) ||
       !Number.isInteger(maxPlayersPerEvent) ||
       maxPlayersPerEvent <= 0 ||
-      !Number.isInteger(confirmationOpenHoursBefore) ||
-      confirmationOpenHoursBefore < 0 ||
-      !Number.isInteger(confirmationCloseMinutesBefore) ||
-      confirmationCloseMinutesBefore < 0 ||
       priorityGroups.length === 0
     ) {
       setMessage({ tone: "error", text: "Revise os dados da conta esportiva." });
@@ -1550,8 +1535,8 @@ export default function HomeScreen() {
           modalityId: createModalityId,
           timezone: "America/Sao_Paulo",
           maxPlayersPerEvent,
-          confirmationOpenHoursBefore,
-          confirmationCloseMinutesBefore,
+          confirmationOpenHoursBefore: 0,
+          confirmationCloseMinutesBefore: 0,
           autoNotifyConfirmationOpen: true,
           autoNotifyWaitlistChanges: true,
           autoNotifyEventUpdates: true,
@@ -1562,6 +1547,9 @@ export default function HomeScreen() {
           },
           priorityGroups,
         });
+        if (createDefaultFormationId) {
+          await setDefaultTacticalFormation(resolvedAccountId, createDefaultFormationId);
+        }
       } else {
         const createdAccount = await createSportsAccount({
           createdBy: profile.id,
@@ -1570,8 +1558,8 @@ export default function HomeScreen() {
           modalityId: createModalityId,
           timezone: "America/Sao_Paulo",
           maxPlayersPerEvent,
-          confirmationOpenHoursBefore,
-          confirmationCloseMinutesBefore,
+          confirmationOpenHoursBefore: 0,
+          confirmationCloseMinutesBefore: 0,
           autoNotifyConfirmationOpen: true,
           autoNotifyWaitlistChanges: true,
           autoNotifyEventUpdates: true,
@@ -3759,48 +3747,49 @@ export default function HomeScreen() {
                     <View style={styles.formSection}>
                       <Text style={styles.formSectionTitle}>Regras de presenca</Text>
                       <Text style={styles.fieldHint}>
-                        Configure o limite do evento e quando a confirmacao de presenca abre e fecha.
+                        Configure o limite de jogadores por evento. A confirmacao de presenca e aberta e fechada manualmente.
                       </Text>
 
-                      <View style={styles.row}>
-                        <View style={[styles.fieldBlock, styles.flex]}>
-                          <Text style={styles.label}>Maximo de jogadores</Text>
-                          <Text style={styles.fieldHint}>Quantidade total aceita no evento.</Text>
-                          <TextInput
-                            value={createMaxPlayers}
-                            onChangeText={setCreateMaxPlayers}
-                            placeholder="20"
-                            placeholderTextColor={Colors.textMuted}
-                            keyboardType="number-pad"
-                            style={styles.input}
-                          />
-                        </View>
-                        <View style={[styles.fieldBlock, styles.flex]}>
-                          <Text style={styles.label}>Abrir confirmacao (horas antes)</Text>
-                          <Text style={styles.fieldHint}>Ex.: 48 abre dois dias antes.</Text>
-                          <TextInput
-                            value={createOpenHours}
-                            onChangeText={setCreateOpenHours}
-                            placeholder="48"
-                            placeholderTextColor={Colors.textMuted}
-                            keyboardType="number-pad"
-                            style={styles.input}
-                          />
-                        </View>
-                        <View style={[styles.fieldBlock, styles.flex]}>
-                          <Text style={styles.label}>Fechar confirmacao (min antes)</Text>
-                          <Text style={styles.fieldHint}>Ex.: 120 fecha duas horas antes.</Text>
-                          <TextInput
-                            value={createCloseMinutes}
-                            onChangeText={setCreateCloseMinutes}
-                            placeholder="120"
-                            placeholderTextColor={Colors.textMuted}
-                            keyboardType="number-pad"
-                            style={styles.input}
-                          />
-                        </View>
+                      <View style={[styles.fieldBlock, { maxWidth: 200 }]}>
+                        <Text style={styles.label}>Maximo de jogadores</Text>
+                        <Text style={styles.fieldHint}>Quantidade total aceita no evento.</Text>
+                        <TextInput
+                          value={createMaxPlayers}
+                          onChangeText={setCreateMaxPlayers}
+                          placeholder="20"
+                          placeholderTextColor={Colors.textMuted}
+                          keyboardType="number-pad"
+                          style={styles.input}
+                        />
                       </View>
                     </View>
+
+                    {accountFormations.length > 0 && (
+                      <View style={styles.formSection}>
+                        <Text style={styles.formSectionTitle}>Esquema tatico padrao</Text>
+                        <Text style={styles.fieldHint}>
+                          Este esquema vira pre-selecionado ao criar uma partida.
+                        </Text>
+                        <View style={styles.chips}>
+                          {accountFormations.map((formation) => (
+                            <Pressable
+                              key={formation.id}
+                              onPress={() => setCreateDefaultFormationId(formation.id)}
+                              style={[
+                                styles.chip,
+                                createDefaultFormationId === formation.id && styles.chipSelected,
+                              ]}>
+                              <Text style={[
+                                styles.chipText,
+                                createDefaultFormationId === formation.id && styles.chipTextSelected,
+                              ]}>
+                                {formation.name}
+                              </Text>
+                            </Pressable>
+                          ))}
+                        </View>
+                      </View>
+                    )}
 
                     <View style={styles.formSection}>
                       <View style={styles.inlineHeader}>

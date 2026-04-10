@@ -1191,6 +1191,9 @@ export default function RosterScreen() {
                     <Text style={styles.fieldHint}>
                       Marque as posicoes que o jogador joga e informe a nota (0-10) por posicao.
                     </Text>
+                    <Text style={styles.fieldHint}>
+                      {"P = Principal  ·  S = Secundária  ·  I = Improviso"}
+                    </Text>
                     {modalityPositions.map((position) => {
                       const isSelected = position.id in playerPositionDrafts;
                       const draft = playerPositionDrafts[position.id];

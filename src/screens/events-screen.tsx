@@ -943,6 +943,8 @@ export default function EventsScreen() {
   const [weeklyPriorityFilter, setWeeklyPriorityFilter] = useState<string>("all");
   const [isLoading, setIsLoading] = useState(false);
   const [isCreatingEvent, setIsCreatingEvent] = useState(false);
+  const [createEventDateDraft, setCreateEventDateDraft] = useState("");
+  const [isCreateEventModalVisible, setIsCreateEventModalVisible] = useState(false);
   const [eventActionId, setEventActionId] = useState<string | null>(null);
   const [votingPollId, setVotingPollId] = useState<string | null>(null);
   const [message, setMessage] = useState<{ tone: "success" | "error"; text: string } | null>(null);
@@ -1401,6 +1403,35 @@ export default function EventsScreen() {
     );
   }
 
+  function openCreateEventModal() {
+    if (!overview?.schedules[0]) {
+      setMessage({ tone: "error", text: "Configure um horario semanal antes de criar a chamada." });
+      return;
+    }
+
+    // Pré-calcula a data padrão (próximo dia da semana do schedule)
+    const schedule = overview.schedules[0];
+    const now = new Date();
+    const currentWeekday = now.getDay();
+    let daysUntilNext = (schedule.weekday - currentWeekday + 7) % 7;
+    const nextDate = new Date(now);
+    nextDate.setDate(now.getDate() + daysUntilNext);
+
+    // Se hoje é o dia e já passou o horário, pula para a próxima semana
+    const [endH, endM] = schedule.ends_at.split(":").map(Number);
+    const scheduleEnd = new Date(now);
+    scheduleEnd.setHours(endH, endM, 0, 0);
+    if (daysUntilNext === 0 && scheduleEnd <= now) {
+      nextDate.setDate(nextDate.getDate() + 7);
+    }
+
+    const yyyy = nextDate.getFullYear();
+    const mm = String(nextDate.getMonth() + 1).padStart(2, "0");
+    const dd = String(nextDate.getDate()).padStart(2, "0");
+    setCreateEventDateDraft(`${yyyy}-${mm}-${dd}`);
+    setIsCreateEventModalVisible(true);
+  }
+
   async function handleCreateWeeklyEvent() {
     if (!selectedAccess || !overview || !profile || !canManageWeeklyList) {
       return;
@@ -1413,6 +1444,14 @@ export default function EventsScreen() {
       return;
     }
 
+    // Valida formato YYYY-MM-DD
+    const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+    if (!dateRegex.test(createEventDateDraft)) {
+      setMessage({ tone: "error", text: "Informe a data no formato AAAA-MM-DD." });
+      return;
+    }
+
+    setIsCreateEventModalVisible(false);
     setIsCreatingEvent(true);
     setMessage(null);
 
@@ -1422,6 +1461,7 @@ export default function EventsScreen() {
         schedule: nextSchedule,
         priorityGroups: overview.priorityGroups,
         createdBy: profile.id,
+        overrideDate: createEventDateDraft,
       });
 
       await reloadScreenData();
@@ -2516,7 +2556,7 @@ export default function EventsScreen() {
         {!activeEventItem && canManageWeeklyList ? (
           <View style={newStyles.adminRow}>
             <Pressable
-              onPress={() => void handleCreateWeeklyEvent()}
+              onPress={() => openCreateEventModal()}
               disabled={isCreatingEvent}
               style={[newStyles.adminBtn, isCreatingEvent && newStyles.adminBtnDisabled]}>
               <Text style={newStyles.adminBtnText}>
@@ -2573,7 +2613,7 @@ export default function EventsScreen() {
           </Text>
           {canManageWeeklyList ? (
             <Pressable
-              onPress={() => void handleCreateWeeklyEvent()}
+              onPress={() => openCreateEventModal()}
               disabled={isCreatingEvent}
               style={[styles.primaryButton, isCreatingEvent && styles.buttonDisabled]}>
               {isCreatingEvent ? (
@@ -2822,7 +2862,7 @@ export default function EventsScreen() {
           </Text>
           {canManageWeeklyList ? (
             <Pressable
-              onPress={() => void handleCreateWeeklyEvent()}
+              onPress={() => openCreateEventModal()}
               disabled={isCreatingEvent}
               style={[styles.primaryButton, isCreatingEvent && styles.buttonDisabled]}>
               {isCreatingEvent ? (
@@ -3216,6 +3256,58 @@ export default function EventsScreen() {
           </View>
         ) : null}
       </View>
+    );
+  }
+
+  function renderCreateEventModal() {
+    return (
+      <Modal
+        animationType="fade"
+        visible={isCreateEventModalVisible}
+        transparent
+        onRequestClose={() => setIsCreateEventModalVisible(false)}>
+        <KeyboardAvoidingView
+          behavior={Platform.OS === "ios" ? "padding" : "height"}
+          style={styles.modalBackdrop}>
+          <View style={styles.modalKeyboard}>
+            <View style={styles.modalCard}>
+              <View style={styles.inlineHeader}>
+                <Text style={styles.modalTitle}>Criar chamada</Text>
+                <Pressable onPress={() => setIsCreateEventModalVisible(false)} style={styles.secondaryButton}>
+                  <Text style={styles.secondaryButtonText}>Cancelar</Text>
+                </Pressable>
+              </View>
+
+              <View style={styles.fieldBlock}>
+                <Text style={styles.label}>Data do jogo</Text>
+                <Text style={styles.panelText}>
+                  Confirme ou altere a data no formato AAAA-MM-DD.
+                </Text>
+                <TextInput
+                  value={createEventDateDraft}
+                  onChangeText={setCreateEventDateDraft}
+                  placeholder="Ex: 2025-06-14"
+                  placeholderTextColor={Colors.textMuted}
+                  style={styles.input}
+                  keyboardType="numbers-and-punctuation"
+                  autoCapitalize="none"
+                />
+              </View>
+
+              <Pressable
+                onPress={() => void handleCreateWeeklyEvent()}
+                disabled={isCreatingEvent}
+                style={[styles.primaryButton, isCreatingEvent && styles.buttonDisabled]}>
+                {isCreatingEvent ? (
+                  <ActivityIndicator color="#ffffff" />
+                ) : (
+                  <Text style={styles.primaryButtonText}>Criar chamada para jogo</Text>
+                )}
+              </Pressable>
+            </View>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
     );
   }
 
@@ -3881,6 +3973,7 @@ export default function EventsScreen() {
         {selectedAccess && overview ? renderTabContent() : null}
       </ScrollView>
 
+      {renderCreateEventModal()}
       {renderEventPollModal()}
       {renderMatchModal()}
     </View>
