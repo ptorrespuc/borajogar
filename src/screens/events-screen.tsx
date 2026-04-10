@@ -430,6 +430,50 @@ function buildLineupInput(
 }
 
 /**
+ * Remapeia SlotAssignments de uma formação antiga para uma nova,
+ * mantendo a ordem posicional dos jogadores (slot sort_order).
+ * Jogador na posição ordinal N do esquema antigo vai para o slot N do novo.
+ */
+function remapSlotAssignments(
+  currentAssignments: SlotAssignment[],
+  oldFormation: TacticalFormation | null,
+  newFormation: TacticalFormation | null,
+): SlotAssignment[] {
+  if (!oldFormation || !newFormation || currentAssignments.length === 0) return [];
+
+  // Slots do esquema antigo ordenados por sort_order
+  const oldSlotsSorted = [...oldFormation.slots].sort((a, b) => a.sort_order - b.sort_order);
+
+  // Jogadores na ordem dos slots antigos (apenas os que estão atribuídos)
+  const orderedPlayers: { playerId: string; playerName: string; classification?: SlotAssignment["classification"] }[] = [];
+  for (const slot of oldSlotsSorted) {
+    const assignment = currentAssignments.find((a) => a.slotId === slot.id);
+    if (assignment) {
+      orderedPlayers.push({
+        playerId: assignment.playerId,
+        playerName: assignment.playerName,
+        classification: assignment.classification,
+      });
+    }
+  }
+
+  // Slots do novo esquema ordenados por sort_order
+  const newSlotsSorted = [...newFormation.slots].sort((a, b) => a.sort_order - b.sort_order);
+
+  // Mapeamento 1:1 por ordem posicional
+  const result: SlotAssignment[] = [];
+  for (let i = 0; i < Math.min(orderedPlayers.length, newSlotsSorted.length); i++) {
+    result.push({
+      slotId: newSlotsSorted[i].id,
+      playerId: orderedPlayers[i].playerId,
+      playerName: orderedPlayers[i].playerName,
+      classification: orderedPlayers[i].classification,
+    });
+  }
+  return result;
+}
+
+/**
  * Converte assignedPositionIds (playerId → modalityPositionId) em SlotAssignment[]
  * (slotId → playerId, playerName) que o TacticalField consome.
  *
@@ -962,6 +1006,8 @@ export default function EventsScreen() {
   const [createEventDateDraft, setCreateEventDateDraft] = useState("");
   const [isCreateEventModalVisible, setIsCreateEventModalVisible] = useState(false);
   const [eventActionId, setEventActionId] = useState<string | null>(null);
+  const [batchSelectedPlayerIds, setBatchSelectedPlayerIds] = useState<Set<string>>(new Set());
+  const [isBatchAdding, setIsBatchAdding] = useState(false);
   const [votingPollId, setVotingPollId] = useState<string | null>(null);
   const [message, setMessage] = useState<{ tone: "success" | "error"; text: string } | null>(null);
   const [isEventPollModalVisible, setIsEventPollModalVisible] = useState(false);
@@ -1508,6 +1554,33 @@ export default function EventsScreen() {
       setMessage({ tone: "error", text: getReadableError(actionError) });
     } finally {
       setEventActionId(null);
+    }
+  }
+
+  async function handleBatchAddPlayersToWeeklyList() {
+    if (!activeEventItem || !profile || !canManageWeeklyList || batchSelectedPlayerIds.size === 0) {
+      return;
+    }
+
+    setIsBatchAdding(true);
+    setMessage(null);
+
+    try {
+      await Promise.all(
+        Array.from(batchSelectedPlayerIds).map((playerId) =>
+          addPlayerToWeeklyEvent({
+            eventId: activeEventItem.event.id,
+            playerId,
+            addedBy: profile.id,
+          }),
+        ),
+      );
+      setBatchSelectedPlayerIds(new Set());
+      await reloadScreenData();
+    } catch (actionError) {
+      setMessage({ tone: "error", text: getReadableError(actionError) });
+    } finally {
+      setIsBatchAdding(false);
     }
   }
 
@@ -2725,26 +2798,72 @@ export default function EventsScreen() {
 
               {/* Fora da lista */}
               <View style={newStyles.draftColumn}>
-                <Text style={newStyles.columnTitle}>Fora</Text>
+                <View style={newStyles.columnTitleRow}>
+                  <Text style={newStyles.columnTitle}>Fora</Text>
+                  {canManageWeeklyList && availableWeeklyPlayers.length > 0 ? (
+                    <Pressable
+                      onPress={() => {
+                        const allIds = new Set(availableWeeklyPlayers.map((p) => p.player.id));
+                        const allSelected = availableWeeklyPlayers.every((p) =>
+                          batchSelectedPlayerIds.has(p.player.id),
+                        );
+                        setBatchSelectedPlayerIds(allSelected ? new Set() : allIds);
+                      }}
+                      style={newStyles.selectAllLink}>
+                      <Text style={newStyles.selectAllText}>
+                        {availableWeeklyPlayers.every((p) => batchSelectedPlayerIds.has(p.player.id))
+                          ? "Desmarcar todos"
+                          : "Marcar todos"}
+                      </Text>
+                    </Pressable>
+                  ) : null}
+                </View>
+
                 {availableWeeklyPlayers.length > 0 ? (
-                  availableWeeklyPlayers.map((item) => (
-                    <View key={item.player.id} style={newStyles.playerRow}>
-                      <PlayerAvatar name={item.player.full_name} photoUrl={item.player.photo_url} size={36} />
-                      <View style={newStyles.flex}>
-                        <Text style={newStyles.playerName}>{item.player.full_name}</Text>
-                      </View>
-                      {canManageWeeklyList ? (
+                  <>
+                    {availableWeeklyPlayers.map((item) => {
+                      const isSelected = batchSelectedPlayerIds.has(item.player.id);
+                      return (
                         <Pressable
-                          onPress={() => void handleAddPlayerToWeeklyList(item)}
-                          disabled={eventActionId === item.player.id}
-                          style={newStyles.inlineAction}>
-                          <Text style={newStyles.inlineActionText}>
-                            {eventActionId === item.player.id ? "…" : "Incluir"}
-                          </Text>
+                          key={item.player.id}
+                          onPress={() => {
+                            if (!canManageWeeklyList) return;
+                            setBatchSelectedPlayerIds((prev) => {
+                              const next = new Set(prev);
+                              if (next.has(item.player.id)) next.delete(item.player.id);
+                              else next.add(item.player.id);
+                              return next;
+                            });
+                          }}
+                          style={[newStyles.playerRow, isSelected && newStyles.playerRowSelected]}>
+                          {canManageWeeklyList ? (
+                            <View style={[newStyles.checkbox, isSelected && newStyles.checkboxSelected]}>
+                              {isSelected ? <Text style={newStyles.checkboxTick}>✓</Text> : null}
+                            </View>
+                          ) : null}
+                          <PlayerAvatar name={item.player.full_name} photoUrl={item.player.photo_url} size={36} />
+                          <View style={newStyles.flex}>
+                            <Text style={newStyles.playerName}>{item.player.full_name}</Text>
+                          </View>
                         </Pressable>
-                      ) : null}
-                    </View>
-                  ))
+                      );
+                    })}
+
+                    {canManageWeeklyList && batchSelectedPlayerIds.size > 0 ? (
+                      <Pressable
+                        onPress={() => void handleBatchAddPlayersToWeeklyList()}
+                        disabled={isBatchAdding}
+                        style={[newStyles.batchAddButton, isBatchAdding && newStyles.batchAddButtonDisabled]}>
+                        {isBatchAdding ? (
+                          <ActivityIndicator color="#ffffff" size="small" />
+                        ) : (
+                          <Text style={newStyles.batchAddButtonText}>
+                            Incluir {batchSelectedPlayerIds.size} jogador{batchSelectedPlayerIds.size > 1 ? "es" : ""}
+                          </Text>
+                        )}
+                      </Pressable>
+                    ) : null}
+                  </>
                 ) : (
                   <Text style={newStyles.emptyText}>Todos incluídos.</Text>
                 )}
@@ -3797,7 +3916,14 @@ export default function EventsScreen() {
                         {tacticalFormations.map((formation) => (
                           <Pressable
                             key={`home-formation-${formation.id}`}
-                            onPress={() => setHomeFormationId(formation.id)}
+                            onPress={() => {
+                              const oldFormation = tacticalFormations.find((f) => f.id === homeFormationId) ?? null;
+                              const newFormation = formation;
+                              setHomeFormationId(formation.id);
+                              setHomeSlotAssignments((prev) =>
+                                remapSlotAssignments(prev, oldFormation, newFormation),
+                              );
+                            }}
                             style={[styles.chip, homeFormationId === formation.id && styles.chipSelected]}>
                             <Text style={[styles.chipText, homeFormationId === formation.id && styles.chipTextSelected]}>
                               {formation.name}
@@ -3870,7 +3996,14 @@ export default function EventsScreen() {
                         {tacticalFormations.map((formation) => (
                           <Pressable
                             key={`away-formation-${formation.id}`}
-                            onPress={() => setAwayFormationId(formation.id)}
+                            onPress={() => {
+                              const oldFormation = tacticalFormations.find((f) => f.id === awayFormationId) ?? null;
+                              const newFormation = formation;
+                              setAwayFormationId(formation.id);
+                              setAwaySlotAssignments((prev) =>
+                                remapSlotAssignments(prev, oldFormation, newFormation),
+                              );
+                            }}
                             style={[styles.chip, awayFormationId === formation.id && styles.chipSelected]}>
                             <Text style={[styles.chipText, awayFormationId === formation.id && styles.chipTextSelected]}>
                               {formation.name}
@@ -4487,6 +4620,20 @@ const newStyles = StyleSheet.create({
     letterSpacing: 0.5,
     marginBottom: 2,
   },
+  columnTitleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 2,
+  },
+  selectAllLink: {
+    paddingVertical: 2,
+  },
+  selectAllText: {
+    color: Colors.tint,
+    fontSize: 12,
+    fontWeight: "600",
+  },
   playerRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -4496,6 +4643,46 @@ const newStyles = StyleSheet.create({
     padding: 10,
     borderWidth: 1,
     borderColor: "#e2eadb",
+  },
+  playerRowSelected: {
+    borderColor: Colors.tint,
+    backgroundColor: "#f0f7ec",
+  },
+  checkbox: {
+    width: 22,
+    height: 22,
+    borderRadius: 6,
+    borderWidth: 2,
+    borderColor: "#c7d5be",
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#ffffff",
+  },
+  checkboxSelected: {
+    borderColor: Colors.tint,
+    backgroundColor: Colors.tint,
+  },
+  checkboxTick: {
+    color: "#ffffff",
+    fontSize: 13,
+    fontWeight: "800",
+    lineHeight: 16,
+  },
+  batchAddButton: {
+    marginTop: 4,
+    backgroundColor: Colors.tint,
+    borderRadius: 12,
+    paddingVertical: 12,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  batchAddButtonDisabled: {
+    opacity: 0.5,
+  },
+  batchAddButtonText: {
+    color: "#ffffff",
+    fontSize: 14,
+    fontWeight: "700",
   },
   playerName: {
     flex: 1,
