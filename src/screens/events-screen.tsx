@@ -269,6 +269,131 @@ function calculateTeamRating(
   );
 }
 
+/**
+ * Após o balanceamento por nota e a atribuição de posições dentro de cada time,
+ * tenta melhorar o encaixe posicional trocando um jogador entre times.
+ *
+ * Uma troca (homePlayer ↔ awayPlayer) é aceita se:
+ *  1. Reduz o total de penalidade de classificação (improviso=2, secondary=1, principal=0)
+ *  2. Não aumenta a diferença de rating bruto entre os times além da tolerância
+ *
+ * Itera até não haver mais trocas que melhorem o encaixe (pode convergir em 1 passada).
+ */
+function optimizeCrossTeamPositionFit(
+  homePlayerIds: string[],
+  awayPlayerIds: string[],
+  homeSlotAssignments: SlotAssignment[],
+  awaySlotAssignments: SlotAssignment[],
+  homeAssignedPositionIds: Record<string, string>,
+  awayAssignedPositionIds: Record<string, string>,
+  participants: WeeklyEventParticipantItem[],
+  ratingTolerance = 0.5,
+): {
+  homePlayerIds: string[];
+  awayPlayerIds: string[];
+  homeSlotAssignments: SlotAssignment[];
+  awaySlotAssignments: SlotAssignment[];
+  homeAssignedPositionIds: Record<string, string>;
+  awayAssignedPositionIds: Record<string, string>;
+} {
+  const participantMap = new Map(participants.map((p) => [p.player.id, p]));
+
+  const classificationAt = (
+    playerId: string,
+    positionId: string,
+  ): "principal" | "secondary" | "improviso" | null => {
+    const pos = participantMap.get(playerId)?.preferredPositions.find((pp) => pp.id === positionId);
+    return pos?.classification ?? null;
+  };
+
+  const fitPenalty = (cls: "principal" | "secondary" | "improviso" | null | undefined): number => {
+    if (cls === "principal") return 0;
+    if (cls === "secondary") return 1;
+    return 2; // improviso ou ausente
+  };
+
+  const playerRating = (playerId: string): number =>
+    participantMap.get(playerId)?.player.rating ?? 0;
+
+  let curHomeIds = [...homePlayerIds];
+  let curAwayIds = [...awayPlayerIds];
+  let curHomeSlots = [...homeSlotAssignments];
+  let curAwaySlots = [...awaySlotAssignments];
+  let curHomePosIds = { ...homeAssignedPositionIds };
+  let curAwayPosIds = { ...awayAssignedPositionIds };
+
+  const teamRating = (ids: string[]) => ids.reduce((s, id) => s + playerRating(id), 0);
+
+  let improved = true;
+  while (improved) {
+    improved = false;
+
+    const origDiff = Math.abs(teamRating(curHomeIds) - teamRating(curAwayIds));
+
+    outerLoop: for (const hId of curHomeIds) {
+      for (const aId of curAwayIds) {
+        const hPosId = curHomePosIds[hId];
+        const aPosId = curAwayPosIds[aId];
+        if (!hPosId || !aPosId) continue;
+
+        const hSlot = curHomeSlots.find((s) => s.playerId === hId);
+        const aSlot = curAwaySlots.find((s) => s.playerId === aId);
+        if (!hSlot || !aSlot) continue;
+
+        // Penalidade atual
+        const penBefore = fitPenalty(hSlot.classification) + fitPenalty(aSlot.classification);
+
+        // Penalidade após troca: hId vai ocupar o slot do away (posição aPosId),
+        // aId vai ocupar o slot do home (posição hPosId)
+        const hNewCls = classificationAt(hId, aPosId);
+        const aNewCls = classificationAt(aId, hPosId);
+        const penAfter = fitPenalty(hNewCls) + fitPenalty(aNewCls);
+
+        if (penAfter >= penBefore) continue; // não melhora
+
+        // Verifica equilíbrio de rating
+        const newHomRating = teamRating(curHomeIds) - playerRating(hId) + playerRating(aId);
+        const newAwayRating = teamRating(curAwayIds) - playerRating(aId) + playerRating(hId);
+        if (Math.abs(newHomRating - newAwayRating) > origDiff + ratingTolerance) continue;
+
+        // Aplica troca
+        curHomeIds = curHomeIds.map((id) => (id === hId ? aId : id));
+        curAwayIds = curAwayIds.map((id) => (id === aId ? hId : id));
+
+        // Atualiza slots: o slot do hId no home agora pertence ao aId (e vice-versa)
+        curHomeSlots = curHomeSlots.map((s) =>
+          s.playerId === hId
+            ? { slotId: s.slotId, playerId: aId, playerName: participantMap.get(aId)!.player.full_name, classification: aNewCls }
+            : s,
+        );
+        curAwaySlots = curAwaySlots.map((s) =>
+          s.playerId === aId
+            ? { slotId: s.slotId, playerId: hId, playerName: participantMap.get(hId)!.player.full_name, classification: hNewCls }
+            : s,
+        );
+
+        // Atualiza positionIds
+        const { [hId]: hPos, ...homeRest } = curHomePosIds;
+        const { [aId]: aPos, ...awayRest } = curAwayPosIds;
+        curHomePosIds = { ...homeRest, [aId]: hPos };
+        curAwayPosIds = { ...awayRest, [hId]: aPos };
+
+        improved = true;
+        break outerLoop;
+      }
+    }
+  }
+
+  return {
+    homePlayerIds: curHomeIds,
+    awayPlayerIds: curAwayIds,
+    homeSlotAssignments: curHomeSlots,
+    awaySlotAssignments: curAwaySlots,
+    homeAssignedPositionIds: curHomePosIds,
+    awayAssignedPositionIds: curAwayPosIds,
+  };
+}
+
 function balanceMatchTeams(
   selectedPlayerIds: string[],
   participants: WeeklyEventParticipantItem[],
@@ -2005,8 +2130,6 @@ export default function EventsScreen() {
 
     // Balanceamento simples por nota — funciona com qualquer quantidade de jogadores
     const balancedTeams = balanceMatchTeams(selectedIds, activeParticipants);
-    setMatchHomePlayerIds(balancedTeams.homePlayerIds);
-    setMatchAwayPlayerIds(balancedTeams.awayPlayerIds);
 
     // Após distribuir os times, atribui jogadores a posições no campo
     // usando as notas por posição de cada jogador
@@ -2018,11 +2141,26 @@ export default function EventsScreen() {
     const awayAssignment = buildSlotAssignmentsFromRatings(
       balancedTeams.awayPlayerIds, awayFormation, activeParticipants,
     );
-    setHomeSlotAssignments(homeAssignment.slotAssignments);
-    setAwaySlotAssignments(awayAssignment.slotAssignments);
+
+    // Otimização cruzada: troca jogadores entre times se melhorar encaixe posicional
+    // sem desiquilibrar significativamente a nota dos times (tolerância: 0.5 pts)
+    const optimized = optimizeCrossTeamPositionFit(
+      balancedTeams.homePlayerIds,
+      balancedTeams.awayPlayerIds,
+      homeAssignment.slotAssignments,
+      awayAssignment.slotAssignments,
+      homeAssignment.assignedPositionIds,
+      awayAssignment.assignedPositionIds,
+      activeParticipants,
+    );
+
+    setMatchHomePlayerIds(optimized.homePlayerIds);
+    setMatchAwayPlayerIds(optimized.awayPlayerIds);
+    setHomeSlotAssignments(optimized.homeSlotAssignments);
+    setAwaySlotAssignments(optimized.awaySlotAssignments);
     setMatchAssignedPositionIds({
-      ...homeAssignment.assignedPositionIds,
-      ...awayAssignment.assignedPositionIds,
+      ...optimized.homeAssignedPositionIds,
+      ...optimized.awayAssignedPositionIds,
     });
 
     setMessage({
