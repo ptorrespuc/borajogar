@@ -685,10 +685,16 @@ function autoGenerateMatchTeamsByPositions(input: {
   );
 
   // ── PASSO 2: Gerar lista de vagas ordenada por escassez ──────────────────
+  // Intercala uma vaga por posição em cada rodada para evitar que posições com
+  // os mesmos candidatos esgotem o pool antes das outras posições igualmente críticas.
+  // Ex: [PE, PD, CA, PE, PD, CA] em vez de [PE, PE, PD, PD, CA, CA]
   const slotQueue: { positionId: string }[] = [];
-  for (const { position, countPerTeam } of formationWithScarcity) {
-    for (let i = 0; i < countPerTeam * 2; i++) {
-      slotQueue.push({ positionId: position.id });
+  const maxTotalSlots = Math.max(...formationWithScarcity.map((f) => f.countPerTeam * 2));
+  for (let round = 0; round < maxTotalSlots; round++) {
+    for (const { position, countPerTeam } of formationWithScarcity) {
+      if (round < countPerTeam * 2) {
+        slotQueue.push({ positionId: position.id });
+      }
     }
   }
 
