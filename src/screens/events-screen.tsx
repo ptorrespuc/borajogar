@@ -279,201 +279,6 @@ function calculateTeamRating(
  *
  * Itera até não haver mais trocas que melhorem o encaixe (pode convergir em 1 passada).
  */
-function optimizeCrossTeamPositionFit(
-  homePlayerIds: string[],
-  awayPlayerIds: string[],
-  homeSlotAssignments: SlotAssignment[],
-  awaySlotAssignments: SlotAssignment[],
-  homeAssignedPositionIds: Record<string, string>,
-  awayAssignedPositionIds: Record<string, string>,
-  participants: WeeklyEventParticipantItem[],
-  ratingTolerance = 1.0,
-): {
-  homePlayerIds: string[];
-  awayPlayerIds: string[];
-  homeSlotAssignments: SlotAssignment[];
-  awaySlotAssignments: SlotAssignment[];
-  homeAssignedPositionIds: Record<string, string>;
-  awayAssignedPositionIds: Record<string, string>;
-} {
-  const participantMap = new Map(participants.map((p) => [p.player.id, p]));
-
-  const classificationAt = (
-    playerId: string,
-    positionId: string,
-  ): "principal" | "secondary" | "improviso" | null => {
-    const pos = participantMap.get(playerId)?.preferredPositions.find((pp) => pp.id === positionId);
-    return pos?.classification ?? null;
-  };
-
-  const fitPenalty = (cls: "principal" | "secondary" | "improviso" | null | undefined): number => {
-    if (cls === "principal") return 0;
-    if (cls === "secondary") return 1;
-    return 2; // improviso ou ausente
-  };
-
-  const playerRating = (playerId: string): number =>
-    participantMap.get(playerId)?.player.rating ?? 0;
-
-  let curHomeIds = [...homePlayerIds];
-  let curAwayIds = [...awayPlayerIds];
-  let curHomeSlots = [...homeSlotAssignments];
-  let curAwaySlots = [...awaySlotAssignments];
-  let curHomePosIds = { ...homeAssignedPositionIds };
-  let curAwayPosIds = { ...awayAssignedPositionIds };
-
-  const teamRating = (ids: string[]) => ids.reduce((s, id) => s + playerRating(id), 0);
-
-  let improved = true;
-  while (improved) {
-    improved = false;
-
-    const origDiff = Math.abs(teamRating(curHomeIds) - teamRating(curAwayIds));
-
-    outerLoop: for (const hId of curHomeIds) {
-      for (const aId of curAwayIds) {
-        const hPosId = curHomePosIds[hId];
-        const aPosId = curAwayPosIds[aId];
-        if (!hPosId || !aPosId) continue;
-
-        const hSlot = curHomeSlots.find((s) => s.playerId === hId);
-        const aSlot = curAwaySlots.find((s) => s.playerId === aId);
-        if (!hSlot || !aSlot) continue;
-
-        // Penalidade atual
-        const penBefore = fitPenalty(hSlot.classification) + fitPenalty(aSlot.classification);
-
-        // Penalidade após troca: hId vai ocupar o slot do away (posição aPosId),
-        // aId vai ocupar o slot do home (posição hPosId)
-        const hNewCls = classificationAt(hId, aPosId);
-        const aNewCls = classificationAt(aId, hPosId);
-        const penAfter = fitPenalty(hNewCls) + fitPenalty(aNewCls);
-
-        if (penAfter >= penBefore) continue; // não melhora
-
-        // Verifica equilíbrio de rating
-        const newHomRating = teamRating(curHomeIds) - playerRating(hId) + playerRating(aId);
-        const newAwayRating = teamRating(curAwayIds) - playerRating(aId) + playerRating(hId);
-        if (Math.abs(newHomRating - newAwayRating) > origDiff + ratingTolerance) continue;
-
-        // Aplica troca
-        curHomeIds = curHomeIds.map((id) => (id === hId ? aId : id));
-        curAwayIds = curAwayIds.map((id) => (id === aId ? hId : id));
-
-        // Atualiza slots: o slot do hId no home agora pertence ao aId (e vice-versa)
-        curHomeSlots = curHomeSlots.map((s) =>
-          s.playerId === hId
-            ? { slotId: s.slotId, playerId: aId, playerName: participantMap.get(aId)!.player.full_name, classification: aNewCls }
-            : s,
-        );
-        curAwaySlots = curAwaySlots.map((s) =>
-          s.playerId === aId
-            ? { slotId: s.slotId, playerId: hId, playerName: participantMap.get(hId)!.player.full_name, classification: hNewCls }
-            : s,
-        );
-
-        // Atualiza positionIds
-        const { [hId]: hPos, ...homeRest } = curHomePosIds;
-        const { [aId]: aPos, ...awayRest } = curAwayPosIds;
-        curHomePosIds = { ...homeRest, [aId]: hPos };
-        curAwayPosIds = { ...awayRest, [hId]: aPos };
-
-        improved = true;
-        break outerLoop;
-      }
-    }
-  }
-
-  return {
-    homePlayerIds: curHomeIds,
-    awayPlayerIds: curAwayIds,
-    homeSlotAssignments: curHomeSlots,
-    awaySlotAssignments: curAwaySlots,
-    homeAssignedPositionIds: curHomePosIds,
-    awayAssignedPositionIds: curAwayPosIds,
-  };
-}
-
-function balanceMatchTeams(
-  selectedPlayerIds: string[],
-  participants: WeeklyEventParticipantItem[],
-) {
-  const participantMap = new Map(
-    participants.map((item, index) => [
-      item.player.id,
-      {
-        item,
-        order: index,
-      },
-    ]),
-  );
-
-  const candidates = [...new Set(selectedPlayerIds)]
-    .map((playerId) => {
-      const participant = participantMap.get(playerId);
-
-      if (!participant) {
-        return null;
-      }
-
-      return {
-        id: playerId,
-        order: participant.order,
-        rating: getBalanceRating(participant.item.player.rating),
-      };
-    })
-    .filter(
-      (
-        item,
-      ): item is {
-        id: string;
-        order: number;
-        rating: number;
-      } => item !== null,
-    )
-    .sort((first, second) => {
-      if (second.rating !== first.rating) {
-        return second.rating - first.rating;
-      }
-
-      return first.order - second.order;
-    });
-
-  const homeTarget = Math.ceil(candidates.length / 2);
-  const awayTarget = Math.floor(candidates.length / 2);
-  const homeTeam: typeof candidates = [];
-  const awayTeam: typeof candidates = [];
-  let homeRating = 0;
-  let awayRating = 0;
-
-  for (const candidate of candidates) {
-    const shouldUseHome =
-      awayTeam.length >= awayTarget
-        ? true
-        : homeTeam.length >= homeTarget
-          ? false
-          : homeRating === awayRating
-            ? homeTeam.length <= awayTeam.length
-            : homeRating < awayRating;
-
-    if (shouldUseHome) {
-      homeTeam.push(candidate);
-      homeRating += candidate.rating;
-      continue;
-    }
-
-    awayTeam.push(candidate);
-    awayRating += candidate.rating;
-  }
-
-  return {
-    homePlayerIds: homeTeam.sort((first, second) => first.order - second.order).map((item) => item.id),
-    awayPlayerIds: awayTeam.sort((first, second) => first.order - second.order).map((item) => item.id),
-    homeRating: Number(homeRating.toFixed(2)),
-    awayRating: Number(awayRating.toFixed(2)),
-  };
-}
-
 function buildDefaultMatchFormationCounts(
   positions: ModalityPosition[],
   playersPerTeam: number,
@@ -650,127 +455,6 @@ function buildSlotAssignmentsFromPositions(
  * nota por posição preenchem os slots restantes.
  * Não altera a composição dos times — apenas posiciona no campo.
  */
-function buildSlotAssignmentsFromRatings(
-  playerIds: string[],
-  formation: TacticalFormation | null,
-  participants: WeeklyEventParticipantItem[],
-): { slotAssignments: SlotAssignment[]; assignedPositionIds: Record<string, string> } {
-  if (!formation || formation.slots.length === 0) {
-    return { slotAssignments: [], assignedPositionIds: {} };
-  }
-
-  const participantMap = new Map(participants.map((p) => [p.player.id, p]));
-
-  // Slots disponíveis por posição (cópia mutável; ignora slots sem posição definida)
-  const remainingSlotsByPosition = new Map<string, TacticalFormationSlot[]>();
-  for (const slot of formation.slots) {
-    if (!slot.modality_position_id) continue;
-    const list = remainingSlotsByPosition.get(slot.modality_position_id) ?? [];
-    list.push(slot);
-    remainingSlotsByPosition.set(slot.modality_position_id, list);
-  }
-
-  const assignedPlayerIds = new Set<string>();
-  const resultSlots: SlotAssignment[] = [];
-  const resultPositions: Record<string, string> = {};
-
-  // Ordena prioridade de classificação: principal > secondary > improviso > sem classificação
-  const classOrder = { principal: 0, secondary: 1, improviso: 2 };
-
-  // Pré-calcula quantas posições com slot disponível cada jogador tem (para critério de flexibilidade)
-  const matchableCountByPlayer = new Map<string, number>();
-  for (const playerId of playerIds) {
-    const participant = participantMap.get(playerId);
-    if (!participant) continue;
-    const count = participant.preferredPositions.filter(
-      (pos) => pos.positionRating !== null && remainingSlotsByPosition.has(pos.id),
-    ).length;
-    matchableCountByPlayer.set(playerId, count);
-  }
-
-  type RatedCandidate = {
-    playerId: string;
-    positionId: string;
-    rating: number;
-    classification: "principal" | "secondary" | "improviso" | null;
-  };
-  const ratedCandidates: RatedCandidate[] = [];
-
-  for (const playerId of playerIds) {
-    const participant = participantMap.get(playerId);
-    if (!participant) continue;
-
-    for (const pos of participant.preferredPositions) {
-      if (pos.positionRating === null) continue; // só quem tem nota definida entra na fase 1
-      if (!remainingSlotsByPosition.has(pos.id)) continue;
-      ratedCandidates.push({
-        playerId,
-        positionId: pos.id,
-        rating: pos.positionRating,
-        classification: pos.classification,
-      });
-    }
-  }
-
-  // Ordena: classificação (P>S>I) → flexibilidade asc (menos opções = prioridade) → nota desc
-  // O critério de flexibilidade garante que jogadores com poucas posições (ex: Alê só joga CA)
-  // recebam o slot antes de jogadores versáteis que poderiam jogar em outra posição.
-  ratedCandidates.sort((a, b) => {
-    const clsA = a.classification != null ? classOrder[a.classification] : 3;
-    const clsB = b.classification != null ? classOrder[b.classification] : 3;
-    if (clsA !== clsB) return clsA - clsB;
-    const flexA = matchableCountByPlayer.get(a.playerId) ?? 0;
-    const flexB = matchableCountByPlayer.get(b.playerId) ?? 0;
-    if (flexA !== flexB) return flexA - flexB; // menos flexível tem prioridade
-    return b.rating - a.rating;
-  });
-
-  for (const { playerId, positionId, classification } of ratedCandidates) {
-    if (assignedPlayerIds.has(playerId)) continue;
-    const slots = remainingSlotsByPosition.get(positionId);
-    if (!slots || slots.length === 0) continue;
-
-    const slot = slots.shift()!;
-    const participant = participantMap.get(playerId)!;
-    assignedPlayerIds.add(playerId);
-    resultSlots.push({
-      slotId: slot.id,
-      playerId,
-      playerName: participant.player.full_name,
-      classification,
-    });
-    resultPositions[playerId] = positionId;
-  }
-
-  // Fase final: jogadores sem nota por posição preenchem slots restantes
-  const remainingSlotsList: TacticalFormationSlot[] = [];
-  for (const slots of remainingSlotsByPosition.values()) {
-    remainingSlotsList.push(...slots);
-  }
-
-  for (const playerId of playerIds) {
-    if (assignedPlayerIds.has(playerId)) continue;
-    const participant = participantMap.get(playerId);
-    if (!participant) continue;
-
-    const slot = remainingSlotsList.shift();
-    if (!slot) break;
-
-    assignedPlayerIds.add(playerId);
-    resultSlots.push({
-      slotId: slot.id,
-      playerId,
-      playerName: participant.player.full_name,
-      classification: "improviso", // sem nota definida = improviso por padrão
-    });
-    if (slot.modality_position_id) {
-      resultPositions[playerId] = slot.modality_position_id;
-    }
-  }
-
-  return { slotAssignments: resultSlots, assignedPositionIds: resultPositions };
-}
-
 /**
  * Monta dois times equilibrados seguindo a especificação de heurística em 7 passos:
  *
@@ -2117,58 +1801,6 @@ export default function EventsScreen() {
     }));
   }
 
-  function handleBalanceSelectedPlayers() {
-    const selectedIds = [...new Set(matchSelectedPlayerIds)];
-
-    if (selectedIds.length < 2) {
-      setMessage({
-        tone: "error",
-        text: "Selecione pelo menos 2 jogadores para balancear os times.",
-      });
-      return;
-    }
-
-    // Balanceamento simples por nota — funciona com qualquer quantidade de jogadores
-    const balancedTeams = balanceMatchTeams(selectedIds, activeParticipants);
-
-    // Após distribuir os times, atribui jogadores a posições no campo
-    // usando as notas por posição de cada jogador
-    const homeFormation = tacticalFormations.find((f) => f.id === homeFormationId) ?? null;
-    const awayFormation = tacticalFormations.find((f) => f.id === awayFormationId) ?? null;
-    const homeAssignment = buildSlotAssignmentsFromRatings(
-      balancedTeams.homePlayerIds, homeFormation, activeParticipants,
-    );
-    const awayAssignment = buildSlotAssignmentsFromRatings(
-      balancedTeams.awayPlayerIds, awayFormation, activeParticipants,
-    );
-
-    // Otimização cruzada: troca jogadores entre times se melhorar encaixe posicional
-    // sem desiquilibrar significativamente a nota dos times (tolerância: 0.5 pts)
-    const optimized = optimizeCrossTeamPositionFit(
-      balancedTeams.homePlayerIds,
-      balancedTeams.awayPlayerIds,
-      homeAssignment.slotAssignments,
-      awayAssignment.slotAssignments,
-      homeAssignment.assignedPositionIds,
-      awayAssignment.assignedPositionIds,
-      activeParticipants,
-    );
-
-    setMatchHomePlayerIds(optimized.homePlayerIds);
-    setMatchAwayPlayerIds(optimized.awayPlayerIds);
-    setHomeSlotAssignments(optimized.homeSlotAssignments);
-    setAwaySlotAssignments(optimized.awaySlotAssignments);
-    setMatchAssignedPositionIds({
-      ...optimized.homeAssignedPositionIds,
-      ...optimized.awayAssignedPositionIds,
-    });
-
-    setMessage({
-      tone: "success",
-      text: `Times balanceados pela nota: ${balancedTeams.homeRating.toFixed(2)} x ${balancedTeams.awayRating.toFixed(2)}.`,
-    });
-  }
-
   function handleAutoGenerateMatch() {
     try {
       const generatedTeams = autoGenerateMatchTeamsByPositions({
@@ -2194,7 +1826,7 @@ export default function EventsScreen() {
 
       setMessage({
         tone: "success",
-        text: `Times gerados automaticamente: ${generatedTeams.homeRating.toFixed(2)} x ${generatedTeams.awayRating.toFixed(2)}.`,
+        text: `Times montados priorizando posicoes e equilibrando notas: ${generatedTeams.homeRating.toFixed(2)} x ${generatedTeams.awayRating.toFixed(2)}.`,
       });
     } catch (generationError) {
       setMessage({ tone: "error", text: getReadableError(generationError) });
@@ -3852,10 +3484,11 @@ export default function EventsScreen() {
     const requiredSelectedCount = playersPerTeamTarget * 2;
     const selectedCountMatchesFormation =
       playersPerTeamTarget > 0 && selectedParticipants.length === requiredSelectedCount;
-    // "Balancear por nota" só precisa de ≥ 2 jogadores
-    const canRunRatingBalance = matchSelectedPlayerIds.length >= 2;
-    // "Montar 2 times" (por posição) precisa de count exato
-    const canRunFormationBalance = selectedFormation.length > 0 && selectedCountMatchesFormation;
+    const canBuildBalancedMatch = selectedFormation.length > 0 && selectedCountMatchesFormation;
+    const buildBalancedMatchLabel =
+      selectedFormation.length > 0
+        ? `Montar times equilibrados (${requiredSelectedCount} jog.)`
+        : "Defina a formacao para montar os times";
     const unassignedSelectedCount = selectedParticipants.filter(
       (item) =>
         !matchHomePlayerIds.includes(item.player.id) && !matchAwayPlayerIds.includes(item.player.id),
@@ -3940,19 +3573,6 @@ export default function EventsScreen() {
                   </View>
                 ) : null}
 
-                {selectedFormation.length > 0 && (
-                  <View style={styles.listActions}>
-                    <Pressable
-                      onPress={handleAutoGenerateMatch}
-                      disabled={!canRunFormationBalance}
-                      style={[styles.secondaryButton, !canRunFormationBalance && styles.buttonDisabled]}>
-                      <Text style={styles.secondaryButtonText}>
-                        {`Montar 2 times (${requiredSelectedCount} jog.)`}
-                      </Text>
-                    </Pressable>
-                  </View>
-                )}
-
                 <View style={styles.formSection}>
                   <View style={styles.formSectionHeader}>
                     <Text style={styles.formSectionTitle}>Jogadores</Text>
@@ -3986,10 +3606,10 @@ export default function EventsScreen() {
                         <Text style={styles.secondaryButtonText}>Limpar</Text>
                       </Pressable>
                     <Pressable
-                      onPress={handleBalanceSelectedPlayers}
-                      disabled={!canRunRatingBalance}
-                      style={[styles.secondaryButton, !canRunRatingBalance && styles.buttonDisabled]}>
-                      <Text style={styles.secondaryButtonText}>Balancear por nota</Text>
+                      onPress={handleAutoGenerateMatch}
+                      disabled={!canBuildBalancedMatch}
+                      style={[styles.secondaryButton, !canBuildBalancedMatch && styles.buttonDisabled]}>
+                      <Text style={styles.secondaryButtonText}>{buildBalancedMatchLabel}</Text>
                     </Pressable>
                   </View>
 
@@ -4078,9 +3698,12 @@ export default function EventsScreen() {
                         const isInTeam = matchHomePlayerIds.includes(item.player.id);
                         const slotPendingForHome = pendingSlot?.team === "home";
                         const homeAssignment = homeSlotAssignments.find((a) => a.playerId === item.player.id);
-                        const assignedLabel = homeAssignment
-                          ? homeFormation?.slots.find((s) => s.id === homeAssignment.slotId)?.slot_label ?? null
-                          : null;
+                        const assignedPositionId = matchAssignedPositionIds[item.player.id];
+                        const assignedLabel =
+                          (homeAssignment
+                            ? homeFormation?.slots.find((s) => s.id === homeAssignment.slotId)?.slot_label ?? null
+                            : null) ??
+                          (assignedPositionId ? positionNameById.get(assignedPositionId) ?? null : null);
                         return (
                           <Pressable
                             key={`home-${item.player.id}`}
@@ -4158,9 +3781,12 @@ export default function EventsScreen() {
                         const isInTeam = matchAwayPlayerIds.includes(item.player.id);
                         const slotPendingForAway = pendingSlot?.team === "away";
                         const awayAssignment = awaySlotAssignments.find((a) => a.playerId === item.player.id);
-                        const assignedLabel = awayAssignment
-                          ? awayFormation?.slots.find((s) => s.id === awayAssignment.slotId)?.slot_label ?? null
-                          : null;
+                        const assignedPositionId = matchAssignedPositionIds[item.player.id];
+                        const assignedLabel =
+                          (awayAssignment
+                            ? awayFormation?.slots.find((s) => s.id === awayAssignment.slotId)?.slot_label ?? null
+                            : null) ??
+                          (assignedPositionId ? positionNameById.get(assignedPositionId) ?? null : null);
                         return (
                           <Pressable
                             key={`away-${item.player.id}`}
