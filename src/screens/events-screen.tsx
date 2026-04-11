@@ -287,7 +287,7 @@ function optimizeCrossTeamPositionFit(
   homeAssignedPositionIds: Record<string, string>,
   awayAssignedPositionIds: Record<string, string>,
   participants: WeeklyEventParticipantItem[],
-  ratingTolerance = 0.5,
+  ratingTolerance = 1.0,
 ): {
   homePlayerIds: string[];
   awayPlayerIds: string[];
