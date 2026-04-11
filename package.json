@@ -8,8 +8,8 @@
     "ios": "expo start --ios",
     "web": "expo start --web",
     "build:android:preview": "npx eas-cli build --platform android --profile preview",
-    "update:preview": "npx eas-cli update --channel preview --auto",
-    "update:production": "npx eas-cli update --channel production --auto",
+    "update:preview": "npx eas-cli update --channel preview --environment preview --auto",
+    "update:production": "npx eas-cli update --channel production --environment production --auto",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
