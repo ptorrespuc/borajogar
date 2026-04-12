@@ -761,6 +761,134 @@ function autoGenerateMatchTeamsByPositions(input: {
     awayAssignmentsByPosition.set(slot.modality_position_id, list);
   }
 
+  // === FASE: Redução de improvisação intra-time ===
+  // Troca dois jogadores de posições diferentes dentro do mesmo time
+  // se isso reduzir a penalidade total de improvisação (principal=0, secondary=1, improviso=2).
+  // Pode alterar a nota do time; o balanceamento cross-team posterior corrige isso.
+  {
+    const playerMap = new Map(players.map((p) => [p.id, p]));
+    let intraImproved = true;
+
+    while (intraImproved) {
+      intraImproved = false;
+
+      // Verifica time da casa
+      homeIntra: for (let i = 0; i < homeAssignments.length; i++) {
+        for (let j = i + 1; j < homeAssignments.length; j++) {
+          const a = homeAssignments[i];
+          const b = homeAssignments[j];
+          if (!a || !b) continue;
+          const posA = homeSlotById.get(a.slotId)?.modality_position_id;
+          const posB = homeSlotById.get(b.slotId)?.modality_position_id;
+          if (!posA || !posB || posA === posB) continue;
+          const playerA = playerMap.get(a.playerId);
+          const playerB = playerMap.get(b.playerId);
+          if (!playerA || !playerB) continue;
+          const fitA_cur = getFit(playerA, posA);
+          const fitB_cur = getFit(playerB, posB);
+          const fitA_swp = getFit(playerA, posB);
+          const fitB_swp = getFit(playerB, posA);
+          if (fitA_swp.aptitude + fitB_swp.aptitude >= fitA_cur.aptitude + fitB_cur.aptitude) continue;
+          const ratingDelta = fitB_swp.positionRating - a.effectiveRating + fitA_swp.positionRating - b.effectiveRating;
+          homeAssignments[i] = { ...a, playerId: b.playerId, playerName: b.playerName, classification: fitB_swp.classification, effectiveRating: fitB_swp.positionRating };
+          homeAssignments[j] = { ...b, playerId: a.playerId, playerName: a.playerName, classification: fitA_swp.classification, effectiveRating: fitA_swp.positionRating };
+          homeRating = Number((homeRating + ratingDelta).toFixed(2));
+          intraImproved = true;
+          break homeIntra;
+        }
+      }
+
+      if (intraImproved) continue;
+
+      // Verifica time visitante
+      awayIntra: for (let i = 0; i < awayAssignments.length; i++) {
+        for (let j = i + 1; j < awayAssignments.length; j++) {
+          const a = awayAssignments[i];
+          const b = awayAssignments[j];
+          if (!a || !b) continue;
+          const posA = awaySlotById.get(a.slotId)?.modality_position_id;
+          const posB = awaySlotById.get(b.slotId)?.modality_position_id;
+          if (!posA || !posB || posA === posB) continue;
+          const playerA = playerMap.get(a.playerId);
+          const playerB = playerMap.get(b.playerId);
+          if (!playerA || !playerB) continue;
+          const fitA_cur = getFit(playerA, posA);
+          const fitB_cur = getFit(playerB, posB);
+          const fitA_swp = getFit(playerA, posB);
+          const fitB_swp = getFit(playerB, posA);
+          if (fitA_swp.aptitude + fitB_swp.aptitude >= fitA_cur.aptitude + fitB_cur.aptitude) continue;
+          const ratingDelta = fitB_swp.positionRating - a.effectiveRating + fitA_swp.positionRating - b.effectiveRating;
+          awayAssignments[i] = { ...a, playerId: b.playerId, playerName: b.playerName, classification: fitB_swp.classification, effectiveRating: fitB_swp.positionRating };
+          awayAssignments[j] = { ...b, playerId: a.playerId, playerName: a.playerName, classification: fitA_swp.classification, effectiveRating: fitA_swp.positionRating };
+          awayRating = Number((awayRating + ratingDelta).toFixed(2));
+          intraImproved = true;
+          break awayIntra;
+        }
+      }
+    }
+  }
+
+  // === FASE: Redução de improvisação cross-team (posições diferentes) ===
+  // Troca um jogador do time da casa com um do visitante em posições diferentes,
+  // se reduzir improvisação E não piorar o desequilíbrio de notas além de 1.0 ponto.
+  {
+    const playerMap = new Map(players.map((p) => [p.id, p]));
+    let crossImproved = true;
+
+    while (crossImproved) {
+      crossImproved = false;
+
+      crossLoop: for (let hi = 0; hi < homeAssignments.length; hi++) {
+        for (let ai = 0; ai < awayAssignments.length; ai++) {
+          const hA = homeAssignments[hi];
+          const aA = awayAssignments[ai];
+          if (!hA || !aA) continue;
+          const posH = homeSlotById.get(hA.slotId)?.modality_position_id;
+          const posAw = awaySlotById.get(aA.slotId)?.modality_position_id;
+          if (!posH || !posAw || posH === posAw) continue;
+          const playerH = playerMap.get(hA.playerId);
+          const playerAw = playerMap.get(aA.playerId);
+          if (!playerH || !playerAw) continue;
+          const fitH_cur = getFit(playerH, posH);
+          const fitAw_cur = getFit(playerAw, posAw);
+          // playerH vai para o slot home (posH) com playerAw; playerAw vai para o slot away (posAw) com playerH
+          const fitH_swp = getFit(playerH, posAw);   // playerH passaria a jogar posAw (no time visitante)
+          const fitAw_swp = getFit(playerAw, posH);  // playerAw passaria a jogar posH (no time da casa)
+          if (fitH_swp.aptitude + fitAw_swp.aptitude >= fitH_cur.aptitude + fitAw_cur.aptitude) continue;
+          const newHomeRating = Number((homeRating - hA.effectiveRating + fitAw_swp.positionRating).toFixed(2));
+          const newAwayRating = Number((awayRating - aA.effectiveRating + fitH_swp.positionRating).toFixed(2));
+          if (Math.abs(newHomeRating - newAwayRating) > Math.abs(homeRating - awayRating) + 1.0) continue;
+          homeAssignments[hi] = { ...hA, playerId: aA.playerId, playerName: aA.playerName, classification: fitAw_swp.classification, effectiveRating: fitAw_swp.positionRating };
+          awayAssignments[ai] = { ...aA, playerId: hA.playerId, playerName: hA.playerName, classification: fitH_swp.classification, effectiveRating: fitH_swp.positionRating };
+          homeRating = newHomeRating;
+          awayRating = newAwayRating;
+          crossImproved = true;
+          break crossLoop;
+        }
+      }
+    }
+  }
+
+  // Reconstrói os mapas por posição após as fases de redução de improvisação
+  homeAssignmentsByPosition.clear();
+  awayAssignmentsByPosition.clear();
+  for (const assignment of homeAssignments) {
+    const slot = homeSlotById.get(assignment.slotId);
+    if (slot) {
+      const list = homeAssignmentsByPosition.get(slot.modality_position_id) ?? [];
+      list.push(assignment);
+      homeAssignmentsByPosition.set(slot.modality_position_id, list);
+    }
+  }
+  for (const assignment of awayAssignments) {
+    const slot = awaySlotById.get(assignment.slotId);
+    if (slot) {
+      const list = awayAssignmentsByPosition.get(slot.modality_position_id) ?? [];
+      list.push(assignment);
+      awayAssignmentsByPosition.set(slot.modality_position_id, list);
+    }
+  }
+
   let improved = true;
   let iteration = 0;
   while (improved && iteration < 100) {
