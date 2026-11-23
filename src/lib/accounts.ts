@@ -1136,6 +1136,72 @@ export async function updateSportsAccount(input: UpdateSportsAccountInput) {
   }
 }
 
+export async function renameAccountPriorityGroups(input: {
+  accountId: string;
+  groups: Array<{ id: string | null; name: string }>;
+}) {
+  const groups = input.groups.map((group) => ({ id: group.id, name: group.name.trim() }));
+
+  if (groups.length === 0 || groups.some((group) => !group.name)) {
+    throw new Error("Informe um nome para cada grupo.");
+  }
+
+  const lowerNames = groups.map((group) => group.name.toLowerCase());
+
+  if (new Set(lowerNames).size !== lowerNames.length) {
+    throw new Error("Cada grupo precisa ter um nome diferente.");
+  }
+
+  const { data: existingData, error: existingError } = await supabase
+    .from("account_priority_groups")
+    .select("id, priority_rank")
+    .eq("account_id", input.accountId)
+    .eq("is_active", true)
+    .order("priority_rank", { ascending: true });
+
+  throwIfError(existingError);
+
+  const existing = (existingData ?? []) as Array<{ id: string; priority_rank: number }>;
+  const existingIds = new Set(existing.map((group) => group.id));
+  const toRename = groups.filter((group) => group.id && existingIds.has(group.id));
+
+  // Fase 1: nomes provisorios, para permitir trocar nomes entre grupos sem violar a regra de nome unico.
+  for (const group of toRename) {
+    const { error } = await supabase
+      .from("account_priority_groups")
+      .update({ name: `__tmp_${group.id}` })
+      .eq("id", group.id as string);
+
+    throwIfError(error);
+  }
+
+  // Fase 2: nomes finais.
+  for (const group of toRename) {
+    const { error } = await supabase
+      .from("account_priority_groups")
+      .update({ name: group.name, updated_at: new Date().toISOString() })
+      .eq("id", group.id as string);
+
+    throwIfError(error);
+  }
+
+  // Grupos novos entram no fim da fila de prioridade.
+  let nextRank = existing.reduce((max, group) => Math.max(max, group.priority_rank), 0) + 1;
+
+  for (const group of groups.filter((item) => !item.id)) {
+    const { error } = await supabase.from("account_priority_groups").insert({
+      account_id: input.accountId,
+      name: group.name,
+      priority_rank: nextRank,
+      color_hex: null,
+      is_active: true,
+    });
+
+    throwIfError(error);
+    nextRank += 1;
+  }
+}
+
 async function replaceAccountPlayerPositionPreferences(
   accountPlayerId: string,
   orderedPositions: PlayerPositionInput[],

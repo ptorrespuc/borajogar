@@ -63,6 +63,7 @@ import {
   upsertAccountPlayerFromAccess,
   upsertAccountMembership,
   updateSportsAccountBasics,
+  renameAccountPriorityGroups,
   type AccountOverview,
   type EventPollOptionInput,
   type EventMatchItem,
@@ -473,6 +474,9 @@ export default function HomeScreen() {
   const [createEndsAt, setCreateEndsAt] = useState("22:00");
   const [createMaxPlayers, setCreateMaxPlayers] = useState("20");
   const [createDefaultFormationId, setCreateDefaultFormationId] = useState<string | null>(null);
+  const [groupsEditing, setGroupsEditing] = useState(false);
+  const [groupsDraft, setGroupsDraft] = useState<Array<{ id: string | null; name: string }>>([]);
+  const [groupsSaving, setGroupsSaving] = useState(false);
   const [priorityGroupDrafts, setPriorityGroupDrafts] = useState<PriorityGroupDraft[]>(() =>
     buildPriorityGroupDrafts(defaultPriorityGroupNames),
   );
@@ -1001,6 +1005,32 @@ export default function HomeScreen() {
     setCreateMaxPlayers("20");
     setCreateDefaultFormationId(null);
     setPriorityGroupDrafts(buildPriorityGroupDrafts(defaultPriorityGroupNames));
+  }
+
+  function startEditingPriorityGroups() {
+    setGroupsDraft((overview?.priorityGroups ?? []).map((group) => ({ id: group.id, name: group.name })));
+    setGroupsEditing(true);
+  }
+
+  async function saveEditedPriorityGroups() {
+    if (!overview) {
+      return;
+    }
+
+    setGroupsSaving(true);
+    setMessage(null);
+
+    try {
+      await renameAccountPriorityGroups({ accountId: overview.account.id, groups: groupsDraft });
+      setOverview(await getAccountOverview(overview.account.id));
+      await refresh();
+      setGroupsEditing(false);
+      setMessage({ tone: "success", text: "Nomes dos grupos atualizados." });
+    } catch (saveError) {
+      setMessage({ tone: "error", text: getReadableError(saveError) });
+    } finally {
+      setGroupsSaving(false);
+    }
   }
 
   function updatePriorityGroupDraftName(draftId: string, nextName: string) {
@@ -5149,19 +5179,63 @@ export default function HomeScreen() {
                   </View>
 
                   <View style={styles.panel}>
-                    <Text style={styles.panelTitle}>Grupos prioritarios</Text>
-                    <Text style={styles.panelText}>
-                      Cada conta esportiva define seus proprios grupos. Eles nao sao compartilhados entre contas diferentes.
-                    </Text>
-                    <View style={styles.chips}>
-                      {overview.priorityGroups.map((group) => (
-                        <View key={group.id} style={styles.tag}>
-                          <Text style={styles.tagText}>
-                            {group.priority_rank}. {group.name}
-                          </Text>
-                        </View>
-                      ))}
+                    <View style={styles.inlineHeader}>
+                      <View style={styles.inlineHeaderContent}>
+                        <Text style={styles.panelTitle}>Grupos prioritarios</Text>
+                      </View>
+                      {isSuperAdmin && !groupsEditing ? (
+                        <Pressable onPress={startEditingPriorityGroups} style={styles.secondaryButton}>
+                          <Text style={styles.secondaryButtonText}>Renomear grupos</Text>
+                        </Pressable>
+                      ) : null}
                     </View>
+                    <Text style={styles.panelText}>
+                      Cada conta esportiva define seus proprios grupos. Ex.: Prioridade 1 = Mensalistas. A ordem define quem tem preferencia.
+                    </Text>
+                    {groupsEditing ? (
+                      <View style={{ gap: 10 }}>
+                        {groupsDraft.map((group, index) => (
+                          <View key={group.id ?? `novo-${index}`} style={{ gap: 4 }}>
+                            <Text style={styles.fieldHint}>Prioridade {index + 1}</Text>
+                            <TextInput
+                              value={group.name}
+                              onChangeText={(value) =>
+                                setGroupsDraft((current) =>
+                                  current.map((item, itemIndex) => (itemIndex === index ? { ...item, name: value } : item)),
+                                )
+                              }
+                              placeholder="Ex.: Mensalistas"
+                              placeholderTextColor={Colors.textMuted}
+                              style={styles.input}
+                            />
+                          </View>
+                        ))}
+                        <Pressable
+                          onPress={() => setGroupsDraft((current) => [...current, { id: null, name: "" }])}
+                          style={styles.secondaryButton}>
+                          <Text style={styles.secondaryButtonText}>Adicionar grupo</Text>
+                        </Pressable>
+                        <Pressable
+                          onPress={() => void saveEditedPriorityGroups()}
+                          disabled={groupsSaving}
+                          style={[styles.primaryButton, groupsSaving && styles.buttonDisabled]}>
+                          <Text style={styles.primaryButtonText}>{groupsSaving ? "Salvando..." : "Salvar nomes"}</Text>
+                        </Pressable>
+                        <Pressable onPress={() => setGroupsEditing(false)} style={styles.secondaryButton}>
+                          <Text style={styles.secondaryButtonText}>Cancelar</Text>
+                        </Pressable>
+                      </View>
+                    ) : (
+                      <View style={styles.chips}>
+                        {overview.priorityGroups.map((group) => (
+                          <View key={group.id} style={styles.tag}>
+                            <Text style={styles.tagText}>
+                              {group.priority_rank}. {group.name}
+                            </Text>
+                          </View>
+                        ))}
+                      </View>
+                    )}
                   </View>
 
                   {isSuperAdmin ? renderAccountWorkspace() : null}
