@@ -275,6 +275,7 @@ export type CreateSportsAccountInput = {
   priorityGroups: Array<{
     name: string;
     colorHex: string | null;
+    maxPlayers?: number | null;
   }>;
 };
 
@@ -314,6 +315,7 @@ export type UpdateSportsAccountInput = {
   priorityGroups: Array<{
     name: string;
     colorHex: string | null;
+    maxPlayers?: number | null;
   }>;
 };
 
@@ -991,6 +993,7 @@ export async function createSportsAccount(input: CreateSportsAccountInput) {
             name: group.name,
             priority_rank: index + 1,
             color_hex: group.colorHex,
+            max_players: group.maxPlayers ?? null,
             is_active: true,
           })),
         )
@@ -1099,6 +1102,7 @@ export async function updateSportsAccount(input: UpdateSportsAccountInput) {
           name: group.name,
           priority_rank: index + 1,
           color_hex: group.colorHex,
+          max_players: group.maxPlayers ?? null,
           is_active: true,
           updated_at: new Date().toISOString(),
         })
@@ -1113,6 +1117,7 @@ export async function updateSportsAccount(input: UpdateSportsAccountInput) {
       name: group.name,
       priority_rank: index + 1,
       color_hex: group.colorHex,
+      max_players: group.maxPlayers ?? null,
       is_active: true,
     });
 

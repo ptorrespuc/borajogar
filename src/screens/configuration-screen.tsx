@@ -126,6 +126,7 @@ const defaultPriorityGroupNames = ["Prioridade 1", "Prioridade 2", "Lista geral"
 type PriorityGroupDraft = {
   id: string;
   name: string;
+  maxPlayers: string;
 };
 
 type PositionDraft = {
@@ -199,12 +200,13 @@ function isValidHourMinute(value: string) {
   return /^(?:[01]\d|2[0-3]):[0-5]\d$/.test(value);
 }
 
-function createPriorityGroupDraft(name = ""): PriorityGroupDraft {
+function createPriorityGroupDraft(name = "", maxPlayers = ""): PriorityGroupDraft {
   priorityGroupDraftCounter += 1;
 
   return {
     id: `priority-group-${priorityGroupDraftCounter}`,
     name,
+    maxPlayers,
   };
 }
 
@@ -215,6 +217,18 @@ function createPositionDraft(name = ""): PositionDraft {
     id: `position-draft-${positionDraftCounter}`,
     name,
   };
+}
+
+function buildPriorityGroupDraftsFromGroups(groups: Array<{ name: string; max_players: number | null }>) {
+  const valid = groups.filter((group) => group.name.trim());
+
+  if (valid.length === 0) {
+    return [createPriorityGroupDraft(defaultPriorityGroupNames[0])];
+  }
+
+  return valid.map((group) =>
+    createPriorityGroupDraft(group.name.trim(), group.max_players ? String(group.max_players) : ""),
+  );
 }
 
 function buildPriorityGroupDrafts(names: string[]) {
@@ -252,12 +266,21 @@ function createEventPollOptionDraft(
 
 function mapPriorityGroupsForSave(drafts: PriorityGroupDraft[]) {
   return drafts
-    .map((item) => item.name.trim())
-    .filter(Boolean)
-    .map((name, index) => ({
-      name,
-      colorHex: priorityColors[index] ?? null,
-    }));
+    .map((item) => ({ name: item.name.trim(), max: item.maxPlayers.trim() }))
+    .filter((item) => item.name)
+    .map((item, index) => {
+      const maxPlayers = item.max ? Number(item.max) : null;
+
+      if (maxPlayers !== null && (!Number.isInteger(maxPlayers) || maxPlayers < 1)) {
+        throw new Error("O maximo de vagas do grupo deve ser um numero inteiro maior que zero.");
+      }
+
+      return {
+        name: item.name,
+        colorHex: priorityColors[index] ?? null,
+        maxPlayers,
+      };
+    });
 }
 
 function parsePositions(value: string) {
@@ -1046,6 +1069,14 @@ export default function HomeScreen() {
     }
   }
 
+  function updatePriorityGroupDraftMax(draftId: string, nextValue: string) {
+    setPriorityGroupDrafts((currentValue) =>
+      currentValue.map((group) =>
+        group.id === draftId ? { ...group, maxPlayers: nextValue.replace(/[^0-9]/g, "") } : group,
+      ),
+    );
+  }
+
   function updatePriorityGroupDraftName(draftId: string, nextName: string) {
     setPriorityGroupDrafts((currentValue) =>
       currentValue.map((item) => (item.id === draftId ? { ...item, name: nextName } : item)),
@@ -1371,7 +1402,7 @@ export default function HomeScreen() {
       setAccountFormations(formations);
       setCreateDefaultFormationId(formations.find((f) => f.is_default)?.id ?? null);
       setPriorityGroupDrafts(
-        buildPriorityGroupDrafts(accountOverview.priorityGroups.map((group) => group.name)),
+        buildPriorityGroupDraftsFromGroups(accountOverview.priorityGroups),
       );
     } catch (loadError) {
       setMessage({ tone: "error", text: getReadableError(loadError) });
@@ -3890,6 +3921,14 @@ export default function HomeScreen() {
                             onChangeText={(value) => updatePriorityGroupDraftName(group.id, value)}
                             placeholder={`Nome do grupo ${index + 1}`}
                             placeholderTextColor={Colors.textMuted}
+                            style={styles.input}
+                          />
+                          <TextInput
+                            value={group.maxPlayers}
+                            onChangeText={(value) => updatePriorityGroupDraftMax(group.id, value)}
+                            placeholder="Maximo de vagas (vazio = sem limite)"
+                            placeholderTextColor={Colors.textMuted}
+                            keyboardType="number-pad"
                             style={styles.input}
                           />
                         </View>
