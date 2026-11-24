@@ -276,6 +276,7 @@ export type CreateSportsAccountInput = {
     name: string;
     colorHex: string | null;
     maxPlayers?: number | null;
+    paidByDefault?: boolean;
   }>;
 };
 
@@ -316,6 +317,7 @@ export type UpdateSportsAccountInput = {
     name: string;
     colorHex: string | null;
     maxPlayers?: number | null;
+    paidByDefault?: boolean;
   }>;
 };
 
@@ -339,7 +341,7 @@ const eventSelectFields =
   "id, account_id, schedule_id, title, starts_at, ends_at, confirmation_opens_at, confirmation_closes_at, max_players, status, notes, created_by, published_at, completed_at, created_at, updated_at";
 
 const eventParticipantSelectFields =
-  "id, event_id, membership_id, account_player_id, priority_group_id, priority_rank_snapshot, roster_order, response_status, selection_status, response_at, selection_changed_at, added_by, removed_reason, waitlist_notified_at, created_at, updated_at";
+  "id, event_id, membership_id, account_player_id, priority_group_id, priority_rank_snapshot, roster_order, response_status, selection_status, response_at, selection_changed_at, added_by, removed_reason, waitlist_notified_at, is_paid, paid_at, created_at, updated_at";
 
 const eventPollSelectFields =
   "id, event_id, template_id, title, description, selection_mode, status, opens_at, closes_at, sort_order, created_by, created_at, updated_at";
@@ -530,7 +532,7 @@ export async function listAllAccountMemberships(): Promise<AccountMembershipAdmi
     priorityGroupIds.length > 0
       ? supabase
           .from("account_priority_groups")
-          .select("id, account_id, name, priority_rank, color_hex, max_players, is_active, created_at, updated_at")
+          .select("id, account_id, name, priority_rank, color_hex, max_players, paid_by_default, is_active, created_at, updated_at")
           .in("id", priorityGroupIds)
       : Promise.resolve({
           data: [] as AccountPriorityGroup[],
@@ -613,7 +615,7 @@ export async function getAccountOverview(accountId: string): Promise<AccountOver
       .order("starts_at", { ascending: true }),
     supabase
       .from("account_priority_groups")
-      .select("id, account_id, name, priority_rank, color_hex, max_players, is_active, created_at, updated_at")
+      .select("id, account_id, name, priority_rank, color_hex, max_players, paid_by_default, is_active, created_at, updated_at")
       .eq("account_id", accountId)
       .eq("is_active", true)
       .order("priority_rank", { ascending: true }),
@@ -748,7 +750,7 @@ export async function listAccountRoster(
     priorityGroupIds.length > 0
       ? supabase
           .from("account_priority_groups")
-          .select("id, account_id, name, priority_rank, color_hex, max_players, is_active, created_at, updated_at")
+          .select("id, account_id, name, priority_rank, color_hex, max_players, paid_by_default, is_active, created_at, updated_at")
           .in("id", priorityGroupIds)
       : Promise.resolve({
           data: [] as AccountPriorityGroup[],
@@ -994,6 +996,7 @@ export async function createSportsAccount(input: CreateSportsAccountInput) {
             priority_rank: index + 1,
             color_hex: group.colorHex,
             max_players: group.maxPlayers ?? null,
+            paid_by_default: group.paidByDefault ?? false,
             is_active: true,
           })),
         )
@@ -1041,7 +1044,7 @@ export async function updateSportsAccount(input: UpdateSportsAccountInput) {
       .order("created_at", { ascending: true }),
     supabase
       .from("account_priority_groups")
-      .select("id, account_id, name, priority_rank, color_hex, max_players, is_active, created_at, updated_at")
+      .select("id, account_id, name, priority_rank, color_hex, max_players, paid_by_default, is_active, created_at, updated_at")
       .eq("account_id", input.accountId)
       .order("priority_rank", { ascending: true }),
   ]);
@@ -1103,6 +1106,7 @@ export async function updateSportsAccount(input: UpdateSportsAccountInput) {
           priority_rank: index + 1,
           color_hex: group.colorHex,
           max_players: group.maxPlayers ?? null,
+          paid_by_default: group.paidByDefault ?? false,
           is_active: true,
           updated_at: new Date().toISOString(),
         })
@@ -1118,6 +1122,7 @@ export async function updateSportsAccount(input: UpdateSportsAccountInput) {
       priority_rank: index + 1,
       color_hex: group.colorHex,
       max_players: group.maxPlayers ?? null,
+      paid_by_default: group.paidByDefault ?? false,
       is_active: true,
     });
 
@@ -1143,12 +1148,13 @@ export async function updateSportsAccount(input: UpdateSportsAccountInput) {
 
 export async function renameAccountPriorityGroups(input: {
   accountId: string;
-  groups: Array<{ id: string | null; name: string; maxPlayers: number | null }>;
+  groups: Array<{ id: string | null; name: string; maxPlayers: number | null; paidByDefault: boolean }>;
 }) {
   const groups = input.groups.map((group) => ({
     id: group.id,
     name: group.name.trim(),
     maxPlayers: group.maxPlayers,
+    paidByDefault: group.paidByDefault,
   }));
 
   if (groups.some((group) => group.maxPlayers !== null && (!Number.isInteger(group.maxPlayers) || group.maxPlayers < 1))) {
@@ -1192,7 +1198,12 @@ export async function renameAccountPriorityGroups(input: {
   for (const group of toRename) {
     const { error } = await supabase
       .from("account_priority_groups")
-      .update({ name: group.name, max_players: group.maxPlayers, updated_at: new Date().toISOString() })
+      .update({
+        name: group.name,
+        max_players: group.maxPlayers,
+        paid_by_default: group.paidByDefault,
+        updated_at: new Date().toISOString(),
+      })
       .eq("id", group.id as string);
 
     throwIfError(error);
@@ -1208,6 +1219,7 @@ export async function renameAccountPriorityGroups(input: {
       priority_rank: nextRank,
       color_hex: null,
       max_players: group.maxPlayers,
+      paid_by_default: group.paidByDefault,
       is_active: true,
     });
 
@@ -1327,7 +1339,7 @@ export async function listAccountPlayers(
     priorityGroupIds.length > 0
       ? supabase
           .from("account_priority_groups")
-          .select("id, account_id, name, priority_rank, color_hex, max_players, is_active, created_at, updated_at")
+          .select("id, account_id, name, priority_rank, color_hex, max_players, paid_by_default, is_active, created_at, updated_at")
           .in("id", priorityGroupIds)
       : Promise.resolve({
           data: [] as AccountPriorityGroup[],
@@ -1622,7 +1634,7 @@ export async function listWeeklyEventParticipants(
     priorityGroupIds.length > 0
       ? supabase
           .from("account_priority_groups")
-          .select("id, account_id, name, priority_rank, color_hex, max_players, is_active, created_at, updated_at")
+          .select("id, account_id, name, priority_rank, color_hex, max_players, paid_by_default, is_active, created_at, updated_at")
           .in("id", priorityGroupIds)
       : Promise.resolve({
           data: [] as AccountPriorityGroup[],
@@ -2508,11 +2520,16 @@ export async function createWeeklyEventCall(input: {
       players.map((player, index) => {
         const membership = membershipByPlayerId.get(player.id) ?? null;
 
+        const paidByDefault =
+          input.priorityGroups.find((group) => group.id === player.priority_group_id)?.paid_by_default ?? false;
+
         return {
           event_id: createdEvent.id,
           membership_id: membership?.id ?? null,
           account_player_id: player.id,
           priority_group_id: player.priority_group_id,
+          is_paid: paidByDefault,
+          paid_at: paidByDefault ? new Date().toISOString() : null,
           priority_rank_snapshot: getPriorityRank(player.priority_group_id, input.priorityGroups),
           roster_order: index + 1,
           response_status: "pending",
@@ -2567,7 +2584,7 @@ export async function addPlayerToWeeklyEvent(input: {
     listActiveMembershipsForAccount(event.account_id),
     supabase
       .from("account_priority_groups")
-      .select("id, account_id, name, priority_rank, color_hex, max_players, is_active, created_at, updated_at")
+      .select("id, account_id, name, priority_rank, color_hex, max_players, paid_by_default, is_active, created_at, updated_at")
       .eq("account_id", event.account_id)
       .eq("is_active", true),
     supabase
@@ -2629,6 +2646,8 @@ export async function addPlayerToWeeklyEvent(input: {
       account_player_id: input.playerId,
       priority_group_id: player.priority_group_id,
       priority_rank_snapshot: priorityRankSnapshot,
+      is_paid: playerGroup?.paid_by_default ?? false,
+      paid_at: playerGroup?.paid_by_default ? new Date().toISOString() : null,
       roster_order: 999,
       response_status: "pending",
       selection_status: "active",
@@ -2639,6 +2658,19 @@ export async function addPlayerToWeeklyEvent(input: {
   }
 
   await resequenceWeeklyEventParticipants(input.eventId);
+}
+
+export async function setEventParticipantPaid(input: { eventParticipantId: string; isPaid: boolean }) {
+  const { error } = await supabase
+    .from("event_participants")
+    .update({
+      is_paid: input.isPaid,
+      paid_at: input.isPaid ? new Date().toISOString() : null,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", input.eventParticipantId);
+
+  throwIfError(error);
 }
 
 export async function removePlayerFromWeeklyEvent(input: {

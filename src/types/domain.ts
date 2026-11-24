@@ -100,6 +100,7 @@ export type AccountPriorityGroup = {
   priority_rank: number;
   color_hex: string | null;
   max_players: number | null;
+  paid_by_default: boolean;
   is_active: boolean;
   created_at: string;
   updated_at: string;
@@ -197,6 +198,8 @@ export type EventParticipant = {
   added_by: string | null;
   removed_reason: string | null;
   waitlist_notified_at: string | null;
+  is_paid: boolean;
+  paid_at: string | null;
   created_at: string;
   updated_at: string;
 };

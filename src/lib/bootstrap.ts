@@ -77,7 +77,7 @@ export async function listMyMemberships(session: Session | null): Promise<Member
         ? supabase
             .from("account_priority_groups")
             .select(
-              "id, account_id, name, priority_rank, color_hex, max_players, is_active, created_at, updated_at",
+              "id, account_id, name, priority_rank, color_hex, max_players, paid_by_default, is_active, created_at, updated_at",
             )
             .in("id", priorityGroupIds)
         : Promise.resolve({ data: [], error: null }),

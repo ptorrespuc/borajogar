@@ -127,6 +127,7 @@ type PriorityGroupDraft = {
   id: string;
   name: string;
   maxPlayers: string;
+  paidByDefault: boolean;
 };
 
 type PositionDraft = {
@@ -200,13 +201,14 @@ function isValidHourMinute(value: string) {
   return /^(?:[01]\d|2[0-3]):[0-5]\d$/.test(value);
 }
 
-function createPriorityGroupDraft(name = "", maxPlayers = ""): PriorityGroupDraft {
+function createPriorityGroupDraft(name = "", maxPlayers = "", paidByDefault = false): PriorityGroupDraft {
   priorityGroupDraftCounter += 1;
 
   return {
     id: `priority-group-${priorityGroupDraftCounter}`,
     name,
     maxPlayers,
+    paidByDefault,
   };
 }
 
@@ -219,7 +221,9 @@ function createPositionDraft(name = ""): PositionDraft {
   };
 }
 
-function buildPriorityGroupDraftsFromGroups(groups: Array<{ name: string; max_players: number | null }>) {
+function buildPriorityGroupDraftsFromGroups(
+  groups: Array<{ name: string; max_players: number | null; paid_by_default?: boolean }>,
+) {
   const valid = groups.filter((group) => group.name.trim());
 
   if (valid.length === 0) {
@@ -227,7 +231,11 @@ function buildPriorityGroupDraftsFromGroups(groups: Array<{ name: string; max_pl
   }
 
   return valid.map((group) =>
-    createPriorityGroupDraft(group.name.trim(), group.max_players ? String(group.max_players) : ""),
+    createPriorityGroupDraft(
+      group.name.trim(),
+      group.max_players ? String(group.max_players) : "",
+      Boolean(group.paid_by_default),
+    ),
   );
 }
 
@@ -266,7 +274,7 @@ function createEventPollOptionDraft(
 
 function mapPriorityGroupsForSave(drafts: PriorityGroupDraft[]) {
   return drafts
-    .map((item) => ({ name: item.name.trim(), max: item.maxPlayers.trim() }))
+    .map((item) => ({ name: item.name.trim(), max: item.maxPlayers.trim(), paid: item.paidByDefault }))
     .filter((item) => item.name)
     .map((item, index) => {
       const maxPlayers = item.max ? Number(item.max) : null;
@@ -279,6 +287,7 @@ function mapPriorityGroupsForSave(drafts: PriorityGroupDraft[]) {
         name: item.name,
         colorHex: priorityColors[index] ?? null,
         maxPlayers,
+        paidByDefault: item.paid,
       };
     });
 }
@@ -498,7 +507,7 @@ export default function HomeScreen() {
   const [createMaxPlayers, setCreateMaxPlayers] = useState("20");
   const [createDefaultFormationId, setCreateDefaultFormationId] = useState<string | null>(null);
   const [groupsEditing, setGroupsEditing] = useState(false);
-  const [groupsDraft, setGroupsDraft] = useState<Array<{ id: string | null; name: string; max: string }>>([]);
+  const [groupsDraft, setGroupsDraft] = useState<Array<{ id: string | null; name: string; max: string; paid: boolean }>>([]);
   const [groupsSaving, setGroupsSaving] = useState(false);
   const [priorityGroupDrafts, setPriorityGroupDrafts] = useState<PriorityGroupDraft[]>(() =>
     buildPriorityGroupDrafts(defaultPriorityGroupNames),
@@ -1036,6 +1045,7 @@ export default function HomeScreen() {
         id: group.id,
         name: group.name,
         max: group.max_players ? String(group.max_players) : "",
+        paid: Boolean(group.paid_by_default),
       })),
     );
     setGroupsEditing(true);
@@ -1056,6 +1066,7 @@ export default function HomeScreen() {
           id: group.id,
           name: group.name,
           maxPlayers: group.max.trim() ? Number(group.max.trim()) : null,
+          paidByDefault: group.paid,
         })),
       });
       setOverview(await getAccountOverview(overview.account.id));
@@ -3931,6 +3942,19 @@ export default function HomeScreen() {
                             keyboardType="number-pad"
                             style={styles.input}
                           />
+                          <Pressable
+                            onPress={() =>
+                              setPriorityGroupDrafts((currentValue) =>
+                                currentValue.map((item) =>
+                                  item.id === group.id ? { ...item, paidByDefault: !item.paidByDefault } : item,
+                                ),
+                              )
+                            }
+                            style={[styles.chip, group.paidByDefault && styles.chipSelected]}>
+                            <Text style={[styles.chipText, group.paidByDefault && styles.chipTextSelected]}>
+                              {group.paidByDefault ? "Entra como pago: SIM" : "Entra como pago: NAO"}
+                            </Text>
+                          </Pressable>
                         </View>
                       ))}
                     </View>
@@ -5274,10 +5298,23 @@ export default function HomeScreen() {
                               keyboardType="number-pad"
                               style={styles.input}
                             />
+                            <Pressable
+                              onPress={() =>
+                                setGroupsDraft((current) =>
+                                  current.map((item, itemIndex) =>
+                                    itemIndex === index ? { ...item, paid: !item.paid } : item,
+                                  ),
+                                )
+                              }
+                              style={[styles.chip, group.paid && styles.chipSelected]}>
+                              <Text style={[styles.chipText, group.paid && styles.chipTextSelected]}>
+                                {group.paid ? "Entra como pago: SIM" : "Entra como pago: NAO"}
+                              </Text>
+                            </Pressable>
                           </View>
                         ))}
                         <Pressable
-                          onPress={() => setGroupsDraft((current) => [...current, { id: null, name: "", max: "" }])}
+                          onPress={() => setGroupsDraft((current) => [...current, { id: null, name: "", max: "", paid: false }])}
                           style={styles.secondaryButton}>
                           <Text style={styles.secondaryButtonText}>Adicionar grupo</Text>
                         </Pressable>
@@ -5298,6 +5335,7 @@ export default function HomeScreen() {
                             <Text style={styles.tagText}>
                               {group.priority_rank}. {group.name}
                               {group.max_players ? ` (max. ${group.max_players})` : ""}
+                              {group.paid_by_default ? " - entra pago" : ""}
                             </Text>
                           </View>
                         ))}

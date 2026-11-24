@@ -18,6 +18,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Colors from "@/constants/Colors";
 import {
   addPlayerToWeeklyEvent,
+  setEventParticipantPaid,
   closeWeeklyEventList,
   completeEventMatch,
   completeWeeklyEvent,
@@ -1553,6 +1554,27 @@ export default function EventsScreen() {
     }
   }
 
+  async function handleToggleParticipantPaid(item: WeeklyEventParticipantItem) {
+    if (!canManageWeeklyList) {
+      return;
+    }
+
+    setEventActionId(`paid-${item.participant.id}`);
+    setMessage(null);
+
+    try {
+      await setEventParticipantPaid({
+        eventParticipantId: item.participant.id,
+        isPaid: !item.participant.is_paid,
+      });
+      await reloadScreenData();
+    } catch (actionError) {
+      setMessage({ tone: "error", text: getReadableError(actionError) });
+    } finally {
+      setEventActionId(null);
+    }
+  }
+
   async function handleAddPlayerToWeeklyList(item: AccountPlayerAdminItem) {
     if (!activeEventItem || !profile || !canManageWeeklyList) {
       return;
@@ -2733,6 +2755,9 @@ export default function EventsScreen() {
                   <Text style={newStyles.quorumMax}>/{viewedEventItem.event.max_players}</Text>
                 </Text>
                 <Text style={newStyles.quorumLabel}>Confirmações / mínimo</Text>
+                <Text style={newStyles.quorumLabel}>
+                  Pagos: {viewedRoster.filter((item) => item.participant.is_paid).length}/{viewedRoster.length}
+                </Text>
               </View>
               <View style={[newStyles.quorumPill, quorumReached ? newStyles.quorumPillOk : newStyles.quorumPillPending]}>
                 <Text style={[newStyles.quorumPillText, quorumReached ? newStyles.quorumPillTextOk : newStyles.quorumPillTextPending]}>
@@ -2769,6 +2794,21 @@ export default function EventsScreen() {
                             : "Posições não informadas"}
                         </Text>
                       </View>
+                      {canManageWeeklyList ? (
+                        <Pressable
+                          onPress={() => void handleToggleParticipantPaid(item)}
+                          disabled={eventActionId === `paid-${item.participant.id}`}
+                          style={[
+                            newStyles.paidPill,
+                            item.participant.is_paid && newStyles.paidPillOn,
+                          ]}>
+                          <Text style={[newStyles.paidPillText, item.participant.is_paid && newStyles.paidPillTextOn]}>
+                            {item.participant.is_paid ? "Pago" : "Pagar"}
+                          </Text>
+                        </Pressable>
+                      ) : item.participant.is_paid ? (
+                        <Text style={newStyles.paidPillTextOn}>Pago</Text>
+                      ) : null}
                       {canManageWeeklyList ? (
                         <Pressable
                           onPress={() => void handleRemovePlayerFromWeeklyList(item)}
@@ -2875,6 +2915,21 @@ export default function EventsScreen() {
                         </Text>
                       ) : null}
                     </View>
+                      {canManageWeeklyList ? (
+                        <Pressable
+                          onPress={() => void handleToggleParticipantPaid(item)}
+                          disabled={eventActionId === `paid-${item.participant.id}`}
+                          style={[
+                            newStyles.paidPill,
+                            item.participant.is_paid && newStyles.paidPillOn,
+                          ]}>
+                          <Text style={[newStyles.paidPillText, item.participant.is_paid && newStyles.paidPillTextOn]}>
+                            {item.participant.is_paid ? "Pago" : "Pagar"}
+                          </Text>
+                        </Pressable>
+                      ) : item.participant.is_paid ? (
+                        <Text style={newStyles.paidPillTextOn}>Pago</Text>
+                      ) : null}
                   </View>
                 ))
               ) : (
@@ -4507,6 +4562,17 @@ const newStyles = StyleSheet.create({
     gap: 14,
   },
   // Quórum card
+  paidPill: {
+    borderWidth: 1,
+    borderColor: "#c9d3cb",
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    backgroundColor: "#ffffff",
+  },
+  paidPillOn: { backgroundColor: "#1d7f46", borderColor: "#1d7f46" },
+  paidPillText: { fontSize: 12, fontWeight: "700", color: "#4d5f53" },
+  paidPillTextOn: { fontSize: 12, fontWeight: "700", color: "#ffffff" },
   quorumCard: {
     backgroundColor: "#ffffff",
     borderRadius: 20,
