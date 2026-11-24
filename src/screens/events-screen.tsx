@@ -2784,7 +2784,8 @@ export default function EventsScreen() {
                 <Text style={newStyles.columnTitle}>Na lista</Text>
                 {activeParticipants.length > 0 ? (
                   activeParticipants.map((item) => (
-                    <View key={item.participant.id} style={newStyles.playerRow}>
+                    <View key={item.participant.id} style={[newStyles.playerRow, { flexDirection: "column", alignItems: "stretch", gap: 8 }]}>
+                      <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
                       <PlayerAvatar name={item.player.full_name} photoUrl={item.player.photo_url} size={36} />
                       <View style={newStyles.flex}>
                         <Text style={newStyles.playerName}>{item.player.full_name}</Text>
@@ -2794,6 +2795,8 @@ export default function EventsScreen() {
                             : "Posições não informadas"}
                         </Text>
                       </View>
+                      </View>
+                      <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
                       {canManageWeeklyList ? (
                         <Pressable
                           onPress={() => void handleToggleParticipantPaid(item)}
@@ -2819,6 +2822,7 @@ export default function EventsScreen() {
                           </Text>
                         </Pressable>
                       ) : null}
+                      </View>
                     </View>
                   ))
                 ) : (
