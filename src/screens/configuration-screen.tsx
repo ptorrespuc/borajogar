@@ -475,7 +475,7 @@ export default function HomeScreen() {
   const [createMaxPlayers, setCreateMaxPlayers] = useState("20");
   const [createDefaultFormationId, setCreateDefaultFormationId] = useState<string | null>(null);
   const [groupsEditing, setGroupsEditing] = useState(false);
-  const [groupsDraft, setGroupsDraft] = useState<Array<{ id: string | null; name: string }>>([]);
+  const [groupsDraft, setGroupsDraft] = useState<Array<{ id: string | null; name: string; max: string }>>([]);
   const [groupsSaving, setGroupsSaving] = useState(false);
   const [priorityGroupDrafts, setPriorityGroupDrafts] = useState<PriorityGroupDraft[]>(() =>
     buildPriorityGroupDrafts(defaultPriorityGroupNames),
@@ -1008,7 +1008,13 @@ export default function HomeScreen() {
   }
 
   function startEditingPriorityGroups() {
-    setGroupsDraft((overview?.priorityGroups ?? []).map((group) => ({ id: group.id, name: group.name })));
+    setGroupsDraft(
+      (overview?.priorityGroups ?? []).map((group) => ({
+        id: group.id,
+        name: group.name,
+        max: group.max_players ? String(group.max_players) : "",
+      })),
+    );
     setGroupsEditing(true);
   }
 
@@ -1021,7 +1027,14 @@ export default function HomeScreen() {
     setMessage(null);
 
     try {
-      await renameAccountPriorityGroups({ accountId: overview.account.id, groups: groupsDraft });
+      await renameAccountPriorityGroups({
+        accountId: overview.account.id,
+        groups: groupsDraft.map((group) => ({
+          id: group.id,
+          name: group.name,
+          maxPlayers: group.max.trim() ? Number(group.max.trim()) : null,
+        })),
+      });
       setOverview(await getAccountOverview(overview.account.id));
       await refresh();
       setGroupsEditing(false);
@@ -5208,10 +5221,24 @@ export default function HomeScreen() {
                               placeholderTextColor={Colors.textMuted}
                               style={styles.input}
                             />
+                            <TextInput
+                              value={group.max}
+                              onChangeText={(value) =>
+                                setGroupsDraft((current) =>
+                                  current.map((item, itemIndex) =>
+                                    itemIndex === index ? { ...item, max: value.replace(/[^0-9]/g, "") } : item,
+                                  ),
+                                )
+                              }
+                              placeholder="Maximo de vagas (deixe vazio para sem limite)"
+                              placeholderTextColor={Colors.textMuted}
+                              keyboardType="number-pad"
+                              style={styles.input}
+                            />
                           </View>
                         ))}
                         <Pressable
-                          onPress={() => setGroupsDraft((current) => [...current, { id: null, name: "" }])}
+                          onPress={() => setGroupsDraft((current) => [...current, { id: null, name: "", max: "" }])}
                           style={styles.secondaryButton}>
                           <Text style={styles.secondaryButtonText}>Adicionar grupo</Text>
                         </Pressable>
@@ -5231,6 +5258,7 @@ export default function HomeScreen() {
                           <View key={group.id} style={styles.tag}>
                             <Text style={styles.tagText}>
                               {group.priority_rank}. {group.name}
+                              {group.max_players ? ` (max. ${group.max_players})` : ""}
                             </Text>
                           </View>
                         ))}

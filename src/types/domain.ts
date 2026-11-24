@@ -99,6 +99,7 @@ export type AccountPriorityGroup = {
   name: string;
   priority_rank: number;
   color_hex: string | null;
+  max_players: number | null;
   is_active: boolean;
   created_at: string;
   updated_at: string;
