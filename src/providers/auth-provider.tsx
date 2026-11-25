@@ -145,6 +145,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     },
     signOut: async () => {
       await signOutFromSupabase();
+      // Garante a saida na tela mesmo que o aviso do Supabase nao chegue.
+      setSession(null);
+      setProfile(null);
+      setMemberships([]);
+      setIsLoading(false);
     },
     refresh: async () => {
       await hydrate(session, { silent: true });

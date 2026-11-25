@@ -1,6 +1,6 @@
 import type { EmailOtpType, Session } from "@supabase/supabase-js";
 
-import { supabase } from "@/src/lib/supabase";
+import { authStorage, supabase } from "@/src/lib/supabase";
 
 const appScheme = "borajogar";
 
@@ -153,11 +153,35 @@ export async function consumeAuthRedirect(url: string) {
 }
 
 export async function signOut() {
-  const { error } = await supabase.auth.signOut();
+  // Tenta encerrar a sessao no servidor, mas sair do aparelho nao pode depender disso:
+  // sem rede, servidor antigo ou sessao que nao renova, a biblioteca devolve erro e mantem a sessao local.
+  try {
+    const { error } = await supabase.auth.signOut();
 
-  if (error) {
-    throw new Error(error.message);
+    if (error) {
+      console.warn("signOut no servidor falhou; limpando a sessao local.", error.message);
+      await supabase.auth.signOut({ scope: "local" }).catch(() => undefined);
+    }
+  } catch (error) {
+    console.warn("signOut falhou; limpando a sessao local.", error);
+  } finally {
+    await clearLocalAuthSession();
   }
+}
+
+/** Apaga a sessao guardada no aparelho (localStorage no site, AsyncStorage no app). */
+export async function clearLocalAuthSession() {
+  const storageKey = (supabase.auth as unknown as { storageKey?: string }).storageKey;
+
+  if (!storageKey) {
+    return;
+  }
+
+  await Promise.all(
+    [storageKey, `${storageKey}-code-verifier`, `${storageKey}-user`].map((key) =>
+      Promise.resolve(authStorage.removeItem(key)).catch(() => undefined),
+    ),
+  );
 }
 
 export function onAuthStateChange(callback: (session: Session | null) => void) {

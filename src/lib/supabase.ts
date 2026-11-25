@@ -39,7 +39,7 @@ const webStorage = {
   },
 };
 
-const authStorage = Platform.OS === "web" ? webStorage : AsyncStorage ?? noOpStorage;
+export const authStorage = Platform.OS === "web" ? webStorage : AsyncStorage ?? noOpStorage;
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   auth: {
