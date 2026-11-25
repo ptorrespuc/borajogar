@@ -6,7 +6,12 @@ type ProvisionPlayerAccessInput = {
   accountId?: string;
   email?: string;
   fullName?: string;
+  /** Para onde o link do convite volta. Sem isso: pagina web de definir senha (abre em qualquer aparelho). */
+  redirectTo?: string;
 };
+
+const DEFAULT_INVITE_REDIRECT =
+  Deno.env.get("INVITE_REDIRECT_URL") ?? "https://bora.187-53-123-59.sslip.io/reset-password";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -80,6 +85,8 @@ Deno.serve(async (req) => {
     const accountId = body.accountId?.trim();
     const fullName = body.fullName?.trim();
     const email = body.email ? normalizeEmail(body.email) : "";
+    // O Auth so aceita destinos da lista de redirecionamento; fora dela, cai no SITE_URL.
+    const redirectTo = body.redirectTo?.trim() || DEFAULT_INVITE_REDIRECT;
 
     if (!accountId || !fullName || !email || !email.includes("@")) {
       return jsonResponse(400, {
@@ -159,7 +166,7 @@ Deno.serve(async (req) => {
           full_name: fullName,
           name: fullName,
         },
-        redirectTo: "borajogar://reset-password",
+        redirectTo,
       },
     );
 
@@ -177,7 +184,7 @@ Deno.serve(async (req) => {
               full_name: fullName,
               name: fullName,
             },
-            redirectTo: "borajogar://reset-password",
+            redirectTo,
           },
         });
 
