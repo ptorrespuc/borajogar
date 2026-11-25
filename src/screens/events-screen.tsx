@@ -57,6 +57,7 @@ import type {
   TacticalFormationSlot,
 } from "@/src/types/domain";
 import TacticalField, { type SlotAssignment } from "@/src/components/tactical-field";
+import EventCalendar, { toDateKey, type CalendarMark } from "@/src/components/event-calendar";
 
 const roleLabels: Record<AccountRole, string> = {
   group_admin: "Admin do grupo",
@@ -1285,6 +1286,21 @@ export default function EventsScreen() {
     ? timeline.filter((item) => item.event.id !== activeEventItem.event.id)
     : timeline;
   const viewedEventItem = timeline[viewedEventIndex] ?? null;
+  // Jogos por dia (data local AAAA-MM-DD) para o calendario de criar chamada.
+  const eventsByDateKey: Record<string, { item: EventTimelineItem; index: number }> = {};
+  timeline.forEach((item, index) => {
+    const key = toDateKey(new Date(item.event.starts_at));
+    if (!eventsByDateKey[key]) {
+      eventsByDateKey[key] = { item, index };
+    }
+  });
+  const calendarMarks: Record<string, CalendarMark> = Object.fromEntries(
+    Object.entries(eventsByDateKey).map(([key, value]) => [
+      key,
+      { color: getEventStatusStyle(value.item.event.status).dot },
+    ]),
+  );
+  const createEventDateMatch = eventsByDateKey[createEventDateDraft] ?? null;
   const isViewingActiveEvent = viewedEventItem?.event.id === activeEventItem?.event.id;
   const viewedRoster = (viewedEventItem?.participants ?? []).filter(
     (p) => p.participant.selection_status === "active",
@@ -1528,7 +1544,12 @@ export default function EventsScreen() {
     // Valida formato YYYY-MM-DD
     const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
     if (!dateRegex.test(createEventDateDraft)) {
-      setMessage({ tone: "error", text: "Informe a data no formato AAAA-MM-DD." });
+      setMessage({ tone: "error", text: "Escolha a data do jogo no calendario." });
+      return;
+    }
+
+    if (eventsByDateKey[createEventDateDraft]) {
+      setMessage({ tone: "error", text: "Ja existe um jogo nessa data. Escolha outro dia." });
       return;
     }
 
@@ -3462,30 +3483,75 @@ export default function EventsScreen() {
                 </Pressable>
               </View>
 
-              <View style={styles.fieldBlock}>
-                <Text style={styles.label}>Data do jogo</Text>
-                <Text style={styles.panelText}>
-                  Confirme ou altere a data no formato AAAA-MM-DD.
-                </Text>
-                <TextInput
-                  value={createEventDateDraft}
-                  onChangeText={setCreateEventDateDraft}
-                  placeholder="Ex: 2025-06-14"
-                  placeholderTextColor={Colors.textMuted}
-                  style={styles.input}
-                  keyboardType="numbers-and-punctuation"
-                  autoCapitalize="none"
-                />
-              </View>
+              <ScrollView style={styles.modalScroll} contentContainerStyle={styles.modalContent}>
+                <View style={styles.fieldBlock}>
+                  <Text style={styles.label}>Data do jogo</Text>
+                  <Text style={styles.panelText}>
+                    Escolha o dia no calendario. Os dias marcados ja tiveram jogo: toque neles para ver os dados.
+                  </Text>
+                  <EventCalendar
+                    selectedDate={createEventDateDraft}
+                    onSelectDate={setCreateEventDateDraft}
+                    marks={calendarMarks}
+                    highlightWeekday={overview?.schedules[0]?.weekday}
+                  />
+                </View>
+
+                {createEventDateMatch ? (
+                  (() => {
+                    const { item, index } = createEventDateMatch;
+                    const status = getEventStatusStyle(item.event.status);
+                    const confirmed = item.participants.filter(
+                      (p) => p.participant.selection_status === "active",
+                    ).length;
+                    return (
+                      <View style={calendarStyles.matchCard}>
+                        <View style={calendarStyles.matchHeader}>
+                          <Text style={calendarStyles.matchTitle}>
+                            Jogo de {formatEventWeekday(item.event.starts_at)}, {formatEventDay(item.event.starts_at)}
+                          </Text>
+                          <View style={[newStyles.statusBadge, { backgroundColor: status.bg }]}>
+                            <View style={[newStyles.statusDot, { backgroundColor: status.dot }]} />
+                            <Text style={[newStyles.statusBadgeText, { color: status.text }]}>{status.label}</Text>
+                          </View>
+                        </View>
+                        <Text style={styles.panelText}>
+                          {formatEventTime(item.event.starts_at)} – {formatEventTime(item.event.ends_at)} · {confirmed}{" "}
+                          {confirmed === 1 ? "jogador na lista" : "jogadores na lista"}
+                          {item.matches.length > 0
+                            ? ` · ${item.matches.length} ${item.matches.length === 1 ? "partida" : "partidas"}`
+                            : ""}
+                        </Text>
+                        <Pressable
+                          onPress={() => {
+                            setIsCreateEventModalVisible(false);
+                            setViewedEventIndex(index);
+                            setActiveEventTab("roster");
+                          }}
+                          style={styles.secondaryButton}>
+                          <Text style={styles.secondaryButtonText}>Ver dados deste jogo</Text>
+                        </Pressable>
+                      </View>
+                    );
+                  })()
+                ) : createEventDateDraft ? (
+                  <Text style={calendarStyles.newDateText}>
+                    Nova chamada para {formatEventWeekday(`${createEventDateDraft}T12:00:00`)},{" "}
+                    {formatEventDay(`${createEventDateDraft}T12:00:00`)}
+                  </Text>
+                ) : null}
+              </ScrollView>
 
               <Pressable
                 onPress={() => void handleCreateWeeklyEvent()}
-                disabled={isCreatingEvent}
-                style={[styles.primaryButton, isCreatingEvent && styles.buttonDisabled]}>
+                disabled={isCreatingEvent || !!createEventDateMatch}
+                style={[styles.primaryButton, (isCreatingEvent || !!createEventDateMatch) && styles.buttonDisabled]}>
                 {isCreatingEvent ? (
                   <ActivityIndicator color="#ffffff" />
                 ) : (
-                  <Text style={styles.primaryButtonText}>Criar chamada para jogo</Text>
+                  <Text style={styles.primaryButtonText}>
+                    {createEventDateMatch ? "Ja existe jogo nesta data" : "Criar chamada para jogo"}
+                  </Text>
                 )}
               </Pressable>
             </View>
@@ -4321,6 +4387,13 @@ const styles = StyleSheet.create({
 });
 
 // ─── Estilos do novo layout (header fixo + tabs) ──────────────────────────────
+
+const calendarStyles = StyleSheet.create({
+  matchCard: { gap: 10, borderRadius: 18, borderWidth: 1, borderColor: "#d5dfd1", backgroundColor: "#f8faf5", padding: 14 },
+  matchHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8, flexWrap: "wrap" },
+  matchTitle: { color: Colors.text, fontSize: 15, fontWeight: "800", flexShrink: 1 },
+  newDateText: { color: Colors.text, fontSize: 15, fontWeight: "700" },
+});
 
 const newStyles = StyleSheet.create({
   // Header fixo
