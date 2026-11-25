@@ -26,6 +26,7 @@ import {
   createEventPoll,
   createWeeklyEventCall,
   getAccountOverview,
+  isGoalkeeperPositions,
   listAccountEventTimeline,
   listAccountPlayers,
   listAccountPollTemplates,
@@ -1305,6 +1306,10 @@ export default function EventsScreen() {
   const viewedRoster = (viewedEventItem?.participants ?? []).filter(
     (p) => p.participant.selection_status === "active",
   );
+  // Goleiros (1a posicao "goleiro") ficam numa secao propria: nao contam no minimo e nao pagam.
+  const viewedGoalkeepers = viewedRoster.filter((p) => isGoalkeeperPositions(p.preferredPositions));
+  const viewedFieldRoster = viewedRoster.filter((p) => !isGoalkeeperPositions(p.preferredPositions));
+  const maxGoalkeepers = overview?.account.max_goalkeepers_per_event ?? null;
   const activeParticipants = (activeEventItem?.participants ?? [])
     .filter((item) => item.participant.selection_status === "active")
     .sort((first, second) => {
@@ -1627,15 +1632,14 @@ export default function EventsScreen() {
     setMessage(null);
 
     try {
-      await Promise.all(
-        Array.from(batchSelectedPlayerIds).map((playerId) =>
-          addPlayerToWeeklyEvent({
-            eventId: activeEventItem.event.id,
-            playerId,
-            addedBy: profile.id,
-          }),
-        ),
-      );
+      // Um de cada vez: os limites (grupo, goleiros) sao conferidos a cada inclusao.
+      for (const playerId of Array.from(batchSelectedPlayerIds)) {
+        await addPlayerToWeeklyEvent({
+          eventId: activeEventItem.event.id,
+          playerId,
+          addedBy: profile.id,
+        });
+      }
       setBatchSelectedPlayerIds(new Set());
       await reloadScreenData();
     } catch (actionError) {
@@ -2760,10 +2764,74 @@ export default function EventsScreen() {
       const quorumPct = Math.min(
         100,
         viewedEventItem.event.max_players > 0
-          ? Math.round((viewedRoster.length / viewedEventItem.event.max_players) * 100)
+          ? Math.round((viewedFieldRoster.length / viewedEventItem.event.max_players) * 100)
           : 0,
       );
-      const quorumReached = viewedRoster.length >= viewedEventItem.event.max_players;
+      const quorumReached = viewedFieldRoster.length >= viewedEventItem.event.max_players;
+      const goalkeeperCountText = `${viewedGoalkeepers.length}${maxGoalkeepers !== null ? `/${maxGoalkeepers}` : ""}`;
+
+      const renderPaidControl = (item: WeeklyEventParticipantItem) => {
+        if (isGoalkeeperPositions(item.preferredPositions)) {
+          return <Text style={newStyles.playerMeta}>Goleiro · não paga</Text>;
+        }
+
+        if (canManageWeeklyList) {
+          return (
+            <Pressable
+              onPress={() => void handleToggleParticipantPaid(item)}
+              disabled={eventActionId === `paid-${item.participant.id}`}
+              style={[newStyles.paidPill, item.participant.is_paid && newStyles.paidPillOn]}>
+              <Text style={[newStyles.paidPillText, item.participant.is_paid && newStyles.paidPillTextOn]}>
+                {item.participant.is_paid ? "Pago" : "Pagar"}
+              </Text>
+            </Pressable>
+          );
+        }
+
+        return item.participant.is_paid ? <Text style={newStyles.paidPillTextOn}>Pago</Text> : null;
+      };
+
+      const renderDraftRow = (item: WeeklyEventParticipantItem) => (
+        <View key={item.participant.id} style={[newStyles.playerRow, { flexDirection: "column", alignItems: "stretch", gap: 8 }]}>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+            <PlayerAvatar name={item.player.full_name} photoUrl={item.player.photo_url} size={36} />
+            <View style={newStyles.flex}>
+              <Text style={newStyles.playerName}>{item.player.full_name}</Text>
+              <Text style={newStyles.playerMeta}>
+                {item.preferredPositions.length > 0
+                  ? item.preferredPositions.map((p) => p.name).join(", ")
+                  : "Posições não informadas"}
+              </Text>
+            </View>
+          </View>
+          <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+            {renderPaidControl(item)}
+            {canManageWeeklyList ? (
+              <Pressable
+                onPress={() => void handleRemovePlayerFromWeeklyList(item)}
+                disabled={eventActionId === item.participant.id}
+                style={newStyles.inlineDanger}>
+                <Text style={newStyles.inlineDangerText}>
+                  {eventActionId === item.participant.id ? "…" : "Retirar"}
+                </Text>
+              </Pressable>
+            ) : null}
+          </View>
+        </View>
+      );
+
+      const renderConfirmedCard = (item: WeeklyEventParticipantItem) => (
+        <View key={item.participant.id} style={newStyles.playerCard}>
+          <PlayerAvatar name={item.player.full_name} photoUrl={item.player.photo_url} size={36} />
+          <View style={newStyles.flex}>
+            <Text style={newStyles.playerName}>{item.player.full_name}</Text>
+            {item.preferredPositions.length > 0 ? (
+              <Text style={newStyles.playerMeta}>{item.preferredPositions.map((p) => p.name).join(", ")}</Text>
+            ) : null}
+          </View>
+          {renderPaidControl(item)}
+        </View>
+      );
 
       return (
         <View style={newStyles.tabContent}>
@@ -2772,17 +2840,18 @@ export default function EventsScreen() {
             <View style={newStyles.quorumCardRow}>
               <View>
                 <Text style={newStyles.quorumCount}>
-                  {viewedRoster.length}
+                  {viewedFieldRoster.length}
                   <Text style={newStyles.quorumMax}>/{viewedEventItem.event.max_players}</Text>
                 </Text>
-                <Text style={newStyles.quorumLabel}>Confirmações / mínimo</Text>
+                <Text style={newStyles.quorumLabel}>Jogadores de linha / mínimo</Text>
+                <Text style={newStyles.quorumLabel}>Goleiros: {goalkeeperCountText}</Text>
                 <Text style={newStyles.quorumLabel}>
-                  Pagos: {viewedRoster.filter((item) => item.participant.is_paid).length}/{viewedRoster.length}
+                  Pagos: {viewedFieldRoster.filter((item) => item.participant.is_paid).length}/{viewedFieldRoster.length}
                 </Text>
               </View>
               <View style={[newStyles.quorumPill, quorumReached ? newStyles.quorumPillOk : newStyles.quorumPillPending]}>
                 <Text style={[newStyles.quorumPillText, quorumReached ? newStyles.quorumPillTextOk : newStyles.quorumPillTextPending]}>
-                  {quorumReached ? "✓ Quórum atingido" : `Faltam ${viewedEventItem.event.max_players - viewedRoster.length}`}
+                  {quorumReached ? "✓ Quórum atingido" : `Faltam ${viewedEventItem.event.max_players - viewedFieldRoster.length}`}
                 </Text>
               </View>
             </View>
@@ -2804,48 +2873,22 @@ export default function EventsScreen() {
               <View style={newStyles.draftColumn}>
                 <Text style={newStyles.columnTitle}>Na lista</Text>
                 {activeParticipants.length > 0 ? (
-                  activeParticipants.map((item) => (
-                    <View key={item.participant.id} style={[newStyles.playerRow, { flexDirection: "column", alignItems: "stretch", gap: 8 }]}>
-                      <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-                      <PlayerAvatar name={item.player.full_name} photoUrl={item.player.photo_url} size={36} />
-                      <View style={newStyles.flex}>
-                        <Text style={newStyles.playerName}>{item.player.full_name}</Text>
-                        <Text style={newStyles.playerMeta}>
-                          {item.preferredPositions.length > 0
-                            ? item.preferredPositions.map((p) => p.name).join(", ")
-                            : "Posições não informadas"}
-                        </Text>
-                      </View>
-                      </View>
-                      <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
-                      {canManageWeeklyList ? (
-                        <Pressable
-                          onPress={() => void handleToggleParticipantPaid(item)}
-                          disabled={eventActionId === `paid-${item.participant.id}`}
-                          style={[
-                            newStyles.paidPill,
-                            item.participant.is_paid && newStyles.paidPillOn,
-                          ]}>
-                          <Text style={[newStyles.paidPillText, item.participant.is_paid && newStyles.paidPillTextOn]}>
-                            {item.participant.is_paid ? "Pago" : "Pagar"}
-                          </Text>
-                        </Pressable>
-                      ) : item.participant.is_paid ? (
-                        <Text style={newStyles.paidPillTextOn}>Pago</Text>
-                      ) : null}
-                      {canManageWeeklyList ? (
-                        <Pressable
-                          onPress={() => void handleRemovePlayerFromWeeklyList(item)}
-                          disabled={eventActionId === item.participant.id}
-                          style={newStyles.inlineDanger}>
-                          <Text style={newStyles.inlineDangerText}>
-                            {eventActionId === item.participant.id ? "…" : "Retirar"}
-                          </Text>
-                        </Pressable>
-                      ) : null}
-                      </View>
-                    </View>
-                  ))
+                  <>
+                    <Text style={newStyles.sectionLabel}>Goleiros ({goalkeeperCountText})</Text>
+                    {activeParticipants.filter((item) => isGoalkeeperPositions(item.preferredPositions)).length > 0 ? (
+                      activeParticipants
+                        .filter((item) => isGoalkeeperPositions(item.preferredPositions))
+                        .map(renderDraftRow)
+                    ) : (
+                      <Text style={newStyles.emptyText}>Nenhum goleiro na lista.</Text>
+                    )}
+                    <Text style={newStyles.sectionLabel}>
+                      Jogadores ({activeParticipants.filter((item) => !isGoalkeeperPositions(item.preferredPositions)).length})
+                    </Text>
+                    {activeParticipants
+                      .filter((item) => !isGoalkeeperPositions(item.preferredPositions))
+                      .map(renderDraftRow)}
+                  </>
                 ) : (
                   <Text style={newStyles.emptyText}>Nenhum jogador ainda.</Text>
                 )}
@@ -2899,6 +2942,9 @@ export default function EventsScreen() {
                           <PlayerAvatar name={item.player.full_name} photoUrl={item.player.photo_url} size={36} />
                           <View style={newStyles.flex}>
                             <Text style={newStyles.playerName}>{item.player.full_name}</Text>
+                            {isGoalkeeperPositions(item.preferredPositions) ? (
+                              <Text style={newStyles.playerMeta}>Goleiro</Text>
+                            ) : null}
                           </View>
                         </Pressable>
                       );
@@ -2927,36 +2973,15 @@ export default function EventsScreen() {
           ) : (
             // Lista consolidada (evento fechado ou histórico)
             <View>
-              <Text style={newStyles.sectionLabel}>Confirmados ({viewedRoster.length})</Text>
-              {viewedRoster.length > 0 ? (
-                viewedRoster.map((item) => (
-                  <View key={item.participant.id} style={newStyles.playerCard}>
-                    <PlayerAvatar name={item.player.full_name} photoUrl={item.player.photo_url} size={36} />
-                    <View style={newStyles.flex}>
-                      <Text style={newStyles.playerName}>{item.player.full_name}</Text>
-                      {item.preferredPositions.length > 0 ? (
-                        <Text style={newStyles.playerMeta}>
-                          {item.preferredPositions.map((p) => p.name).join(", ")}
-                        </Text>
-                      ) : null}
-                    </View>
-                      {canManageWeeklyList ? (
-                        <Pressable
-                          onPress={() => void handleToggleParticipantPaid(item)}
-                          disabled={eventActionId === `paid-${item.participant.id}`}
-                          style={[
-                            newStyles.paidPill,
-                            item.participant.is_paid && newStyles.paidPillOn,
-                          ]}>
-                          <Text style={[newStyles.paidPillText, item.participant.is_paid && newStyles.paidPillTextOn]}>
-                            {item.participant.is_paid ? "Pago" : "Pagar"}
-                          </Text>
-                        </Pressable>
-                      ) : item.participant.is_paid ? (
-                        <Text style={newStyles.paidPillTextOn}>Pago</Text>
-                      ) : null}
-                  </View>
-                ))
+              {viewedGoalkeepers.length > 0 ? (
+                <>
+                  <Text style={newStyles.sectionLabel}>Goleiros ({goalkeeperCountText})</Text>
+                  {viewedGoalkeepers.map(renderConfirmedCard)}
+                </>
+              ) : null}
+              <Text style={newStyles.sectionLabel}>Confirmados ({viewedFieldRoster.length})</Text>
+              {viewedFieldRoster.length > 0 ? (
+                viewedFieldRoster.map(renderConfirmedCard)
               ) : (
                 <Text style={newStyles.emptyText}>Nenhum jogador registrado.</Text>
               )}

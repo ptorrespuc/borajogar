@@ -72,6 +72,8 @@ export type SportsAccount = {
   modality_id: string;
   timezone: string;
   max_players_per_event: number;
+  /** Maximo de goleiros por chamada (null = sem limite). Goleiros nao contam no minimo e nao pagam. */
+  max_goalkeepers_per_event: number | null;
   confirmation_open_hours_before: number;
   confirmation_close_minutes_before: number;
   auto_notify_confirmation_open: boolean;

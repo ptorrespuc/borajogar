@@ -505,6 +505,7 @@ export default function HomeScreen() {
   const [createStartsAt, setCreateStartsAt] = useState("20:30");
   const [createEndsAt, setCreateEndsAt] = useState("22:00");
   const [createMaxPlayers, setCreateMaxPlayers] = useState("20");
+  const [createMaxGoalkeepers, setCreateMaxGoalkeepers] = useState("2");
   const [createDefaultFormationId, setCreateDefaultFormationId] = useState<string | null>(null);
   const [groupsEditing, setGroupsEditing] = useState(false);
   const [groupsDraft, setGroupsDraft] = useState<Array<{ id: string | null; name: string; max: string; paid: boolean }>>([]);
@@ -1035,6 +1036,7 @@ export default function HomeScreen() {
     setCreateStartsAt("20:30");
     setCreateEndsAt("22:00");
     setCreateMaxPlayers("20");
+    setCreateMaxGoalkeepers("2");
     setCreateDefaultFormationId(null);
     setPriorityGroupDrafts(buildPriorityGroupDrafts(defaultPriorityGroupNames));
   }
@@ -1409,6 +1411,12 @@ export default function HomeScreen() {
       setCreateStartsAt(accountOverview.schedules[0]?.starts_at.slice(0, 5) ?? "20:30");
       setCreateEndsAt(accountOverview.schedules[0]?.ends_at.slice(0, 5) ?? "22:00");
       setCreateMaxPlayers(String(accountOverview.account.max_players_per_event));
+      setCreateMaxGoalkeepers(
+        accountOverview.account.max_goalkeepers_per_event === null ||
+          accountOverview.account.max_goalkeepers_per_event === undefined
+          ? ""
+          : String(accountOverview.account.max_goalkeepers_per_event),
+      );
       const formations = await listTacticalFormations(accountId);
       setAccountFormations(formations);
       setCreateDefaultFormationId(formations.find((f) => f.is_default)?.id ?? null);
@@ -1585,6 +1593,8 @@ export default function HomeScreen() {
 
     const slug = createSlugDraft.trim() || slugify(createNameDraft);
     const maxPlayersPerEvent = Number(createMaxPlayers);
+    // Vazio = sem limite de goleiros.
+    const maxGoalkeepersPerEvent = createMaxGoalkeepers.trim() === "" ? null : Number(createMaxGoalkeepers);
     const weekday = Number(createWeekday);
     const priorityGroups = mapPriorityGroupsForSave(priorityGroupDrafts);
 
@@ -1599,6 +1609,8 @@ export default function HomeScreen() {
       !isValidHourMinute(createEndsAt) ||
       !Number.isInteger(maxPlayersPerEvent) ||
       maxPlayersPerEvent <= 0 ||
+      (maxGoalkeepersPerEvent !== null &&
+        (!Number.isInteger(maxGoalkeepersPerEvent) || maxGoalkeepersPerEvent < 0)) ||
       priorityGroups.length === 0
     ) {
       setMessage({ tone: "error", text: "Revise os dados da conta esportiva." });
@@ -1620,6 +1632,7 @@ export default function HomeScreen() {
           modalityId: createModalityId,
           timezone: "America/Sao_Paulo",
           maxPlayersPerEvent,
+          maxGoalkeepersPerEvent,
           confirmationOpenHoursBefore: 0,
           confirmationCloseMinutesBefore: 0,
           autoNotifyConfirmationOpen: true,
@@ -1643,6 +1656,7 @@ export default function HomeScreen() {
           modalityId: createModalityId,
           timezone: "America/Sao_Paulo",
           maxPlayersPerEvent,
+          maxGoalkeepersPerEvent,
           confirmationOpenHoursBefore: 0,
           confirmationCloseMinutesBefore: 0,
           autoNotifyConfirmationOpen: true,
@@ -3835,17 +3849,31 @@ export default function HomeScreen() {
                         Configure o limite de jogadores por evento. A confirmacao de presenca e aberta e fechada manualmente.
                       </Text>
 
-                      <View style={[styles.fieldBlock, { maxWidth: 200 }]}>
-                        <Text style={styles.label}>Maximo de jogadores</Text>
-                        <Text style={styles.fieldHint}>Quantidade total aceita no evento.</Text>
-                        <TextInput
-                          value={createMaxPlayers}
-                          onChangeText={setCreateMaxPlayers}
-                          placeholder="20"
-                          placeholderTextColor={Colors.textMuted}
-                          keyboardType="number-pad"
-                          style={styles.input}
-                        />
+                      <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 12 }}>
+                        <View style={[styles.fieldBlock, { maxWidth: 200 }]}>
+                          <Text style={styles.label}>Maximo de jogadores</Text>
+                          <Text style={styles.fieldHint}>Minimo da chamada, sem contar goleiros.</Text>
+                          <TextInput
+                            value={createMaxPlayers}
+                            onChangeText={setCreateMaxPlayers}
+                            placeholder="20"
+                            placeholderTextColor={Colors.textMuted}
+                            keyboardType="number-pad"
+                            style={styles.input}
+                          />
+                        </View>
+                        <View style={[styles.fieldBlock, { maxWidth: 200 }]}>
+                          <Text style={styles.label}>Maximo de goleiros</Text>
+                          <Text style={styles.fieldHint}>Goleiros nao contam no minimo e nao pagam. Vazio = sem limite.</Text>
+                          <TextInput
+                            value={createMaxGoalkeepers}
+                            onChangeText={setCreateMaxGoalkeepers}
+                            placeholder="2"
+                            placeholderTextColor={Colors.textMuted}
+                            keyboardType="number-pad"
+                            style={styles.input}
+                          />
+                        </View>
                       </View>
                     </View>
 

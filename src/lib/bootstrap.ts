@@ -70,7 +70,7 @@ export async function listMyMemberships(session: Session | null): Promise<Member
       supabase
         .from("sports_accounts")
         .select(
-          "id, name, slug, modality_id, timezone, max_players_per_event, confirmation_open_hours_before, confirmation_close_minutes_before, auto_notify_confirmation_open, auto_notify_waitlist_changes, auto_notify_event_updates, created_by, created_at, updated_at",
+          "id, name, slug, modality_id, timezone, max_players_per_event, max_goalkeepers_per_event, confirmation_open_hours_before, confirmation_close_minutes_before, auto_notify_confirmation_open, auto_notify_waitlist_changes, auto_notify_event_updates, created_by, created_at, updated_at",
         )
         .in("id", accountIds),
       priorityGroupIds.length > 0

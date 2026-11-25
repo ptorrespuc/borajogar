@@ -262,6 +262,7 @@ export type CreateSportsAccountInput = {
   modalityId: string;
   timezone: string;
   maxPlayersPerEvent: number;
+  maxGoalkeepersPerEvent?: number | null;
   confirmationOpenHoursBefore: number;
   confirmationCloseMinutesBefore: number;
   autoNotifyConfirmationOpen: boolean;
@@ -303,6 +304,7 @@ export type UpdateSportsAccountInput = {
   modalityId: string;
   timezone: string;
   maxPlayersPerEvent: number;
+  maxGoalkeepersPerEvent?: number | null;
   confirmationOpenHoursBefore: number;
   confirmationCloseMinutesBefore: number;
   autoNotifyConfirmationOpen: boolean;
@@ -429,7 +431,7 @@ export async function listAllSportsAccounts(): Promise<SportsAccount[]> {
   const { data, error } = await supabase
     .from("sports_accounts")
     .select(
-      "id, name, slug, modality_id, timezone, max_players_per_event, confirmation_open_hours_before, confirmation_close_minutes_before, auto_notify_confirmation_open, auto_notify_waitlist_changes, auto_notify_event_updates, created_by, created_at, updated_at",
+      "id, name, slug, modality_id, timezone, max_players_per_event, max_goalkeepers_per_event, confirmation_open_hours_before, confirmation_close_minutes_before, auto_notify_confirmation_open, auto_notify_waitlist_changes, auto_notify_event_updates, created_by, created_at, updated_at",
     )
     .order("name", { ascending: true });
 
@@ -522,7 +524,7 @@ export async function listAllAccountMemberships(): Promise<AccountMembershipAdmi
     supabase
       .from("sports_accounts")
       .select(
-        "id, name, slug, modality_id, timezone, max_players_per_event, confirmation_open_hours_before, confirmation_close_minutes_before, auto_notify_confirmation_open, auto_notify_waitlist_changes, auto_notify_event_updates, created_by, created_at, updated_at",
+        "id, name, slug, modality_id, timezone, max_players_per_event, max_goalkeepers_per_event, confirmation_open_hours_before, confirmation_close_minutes_before, auto_notify_confirmation_open, auto_notify_waitlist_changes, auto_notify_event_updates, created_by, created_at, updated_at",
       )
       .in("id", accountIds),
     supabase
@@ -584,7 +586,7 @@ export async function getAccountOverview(accountId: string): Promise<AccountOver
   const { data: accountData, error: accountError } = await supabase
     .from("sports_accounts")
     .select(
-      "id, name, slug, modality_id, timezone, max_players_per_event, confirmation_open_hours_before, confirmation_close_minutes_before, auto_notify_confirmation_open, auto_notify_waitlist_changes, auto_notify_event_updates, created_by, created_at, updated_at",
+      "id, name, slug, modality_id, timezone, max_players_per_event, max_goalkeepers_per_event, confirmation_open_hours_before, confirmation_close_minutes_before, auto_notify_confirmation_open, auto_notify_waitlist_changes, auto_notify_event_updates, created_by, created_at, updated_at",
     )
     .eq("id", accountId)
     .single();
@@ -830,6 +832,7 @@ export async function updateSportsAccountBasics(input: {
   accountId: string;
   name: string;
   maxPlayersPerEvent: number;
+  maxGoalkeepersPerEvent?: number | null;
   confirmationOpenHoursBefore: number;
   confirmationCloseMinutesBefore: number;
 }) {
@@ -956,6 +959,9 @@ export async function createSportsAccount(input: CreateSportsAccountInput) {
       modality_id: input.modalityId,
       timezone: input.timezone,
       max_players_per_event: input.maxPlayersPerEvent,
+      ...(input.maxGoalkeepersPerEvent !== undefined
+        ? { max_goalkeepers_per_event: input.maxGoalkeepersPerEvent }
+        : {}),
       confirmation_open_hours_before: input.confirmationOpenHoursBefore,
       confirmation_close_minutes_before: input.confirmationCloseMinutesBefore,
       auto_notify_confirmation_open: input.autoNotifyConfirmationOpen,
@@ -964,7 +970,7 @@ export async function createSportsAccount(input: CreateSportsAccountInput) {
       created_by: input.createdBy,
     })
     .select(
-      "id, name, slug, modality_id, timezone, max_players_per_event, confirmation_open_hours_before, confirmation_close_minutes_before, auto_notify_confirmation_open, auto_notify_waitlist_changes, auto_notify_event_updates, created_by, created_at, updated_at",
+      "id, name, slug, modality_id, timezone, max_players_per_event, max_goalkeepers_per_event, confirmation_open_hours_before, confirmation_close_minutes_before, auto_notify_confirmation_open, auto_notify_waitlist_changes, auto_notify_event_updates, created_by, created_at, updated_at",
     )
     .single();
 
@@ -1022,6 +1028,9 @@ export async function updateSportsAccount(input: UpdateSportsAccountInput) {
       modality_id: input.modalityId,
       timezone: input.timezone,
       max_players_per_event: input.maxPlayersPerEvent,
+      ...(input.maxGoalkeepersPerEvent !== undefined
+        ? { max_goalkeepers_per_event: input.maxGoalkeepersPerEvent }
+        : {}),
       confirmation_open_hours_before: input.confirmationOpenHoursBefore,
       confirmation_close_minutes_before: input.confirmationCloseMinutesBefore,
       auto_notify_confirmation_open: input.autoNotifyConfirmationOpen,
@@ -2418,6 +2427,55 @@ export async function completeEventMatch(matchId: string) {
   throwIfError(error);
 }
 
+/** Goleiro = jogador cuja primeira posicao preferida e "goleiro". */
+export function isGoalkeeperPositions(positions: { code: string }[]) {
+  return positions[0]?.code === "goleiro";
+}
+
+/** Ids dos jogadores da conta cuja primeira posicao e "goleiro". */
+export async function listGoalkeeperPlayerIds(accountId: string): Promise<Set<string>> {
+  const { data: playerRows, error: playerError } = await supabase
+    .from("account_players")
+    .select("id")
+    .eq("account_id", accountId);
+
+  throwIfError(playerError);
+
+  const playerIds = ((playerRows ?? []) as { id: string }[]).map((row) => row.id);
+
+  if (playerIds.length === 0) {
+    return new Set();
+  }
+
+  const [{ data: preferenceRows, error: preferenceError }, { data: positionRows, error: positionError }] =
+    await Promise.all([
+      supabase
+        .from("account_player_position_preferences")
+        .select("account_player_id, modality_position_id, preference_order")
+        .in("account_player_id", playerIds)
+        .order("preference_order", { ascending: true }),
+      supabase.from("modality_positions").select("id").eq("code", "goleiro"),
+    ]);
+
+  throwIfError(preferenceError);
+  throwIfError(positionError);
+
+  const goalkeeperPositionIds = new Set(((positionRows ?? []) as { id: string }[]).map((row) => row.id));
+  const firstPositionByPlayer = new Map<string, string>();
+
+  for (const row of (preferenceRows ?? []) as { account_player_id: string; modality_position_id: string }[]) {
+    if (!firstPositionByPlayer.has(row.account_player_id)) {
+      firstPositionByPlayer.set(row.account_player_id, row.modality_position_id);
+    }
+  }
+
+  return new Set(
+    Array.from(firstPositionByPlayer.entries())
+      .filter(([, positionId]) => goalkeeperPositionIds.has(positionId))
+      .map(([playerId]) => playerId),
+  );
+}
+
 export async function createWeeklyEventCall(input: {
   account: SportsAccount;
   schedule: AccountSchedule;
@@ -2467,7 +2525,7 @@ export async function createWeeklyEventCall(input: {
   throwIfError(eventError);
 
   const createdEvent = eventData as Event;
-  const [defaultPlayers, memberships] = await Promise.all([
+  const [defaultPlayers, memberships, goalkeeperIds] = await Promise.all([
     supabase
       .from("account_players")
       .select(accountPlayerSelectFields)
@@ -2476,7 +2534,10 @@ export async function createWeeklyEventCall(input: {
       .eq("is_default_for_weekly_list", true)
       .order("full_name", { ascending: true }),
     listActiveMembershipsForAccount(input.account.id),
+    listGoalkeeperPlayerIds(input.account.id),
   ]);
+  const maxGoalkeepers = input.account.max_goalkeepers_per_event ?? null;
+  let goalkeeperCount = 0;
 
   throwIfError(defaultPlayers.error);
 
@@ -2493,6 +2554,15 @@ export async function createWeeklyEventCall(input: {
 
   const groupCounts = new Map<string, number>();
   const players = allDefaultPlayers.filter((player) => {
+    if (goalkeeperIds.has(player.id)) {
+      if (maxGoalkeepers !== null && goalkeeperCount >= maxGoalkeepers) {
+        return false;
+      }
+
+      goalkeeperCount += 1;
+      return true;
+    }
+
     const group = input.priorityGroups.find((item) => item.id === player.priority_group_id);
 
     if (!group || group.max_players === null || group.max_players === undefined) {
@@ -2521,7 +2591,8 @@ export async function createWeeklyEventCall(input: {
         const membership = membershipByPlayerId.get(player.id) ?? null;
 
         const paidByDefault =
-          input.priorityGroups.find((group) => group.id === player.priority_group_id)?.paid_by_default ?? false;
+          !goalkeeperIds.has(player.id) &&
+          (input.priorityGroups.find((group) => group.id === player.priority_group_id)?.paid_by_default ?? false);
 
         return {
           event_id: createdEvent.id,
@@ -2606,8 +2677,42 @@ export async function addPlayerToWeeklyEvent(input: {
   const priorityRankSnapshot = getPriorityRank(player.priority_group_id, priorityGroups);
   const existingParticipant = (existingParticipantData as EventParticipant | null) ?? null;
   const playerGroup = priorityGroups.find((group) => group.id === player.priority_group_id) ?? null;
+  const goalkeeperIds = await listGoalkeeperPlayerIds(event.account_id);
+  const isGoalkeeper = goalkeeperIds.has(player.id);
 
-  if (playerGroup?.max_players && existingParticipant?.selection_status !== "active") {
+  if (isGoalkeeper && existingParticipant?.selection_status !== "active") {
+    const { data: accountRow, error: accountError } = await supabase
+      .from("sports_accounts")
+      .select("max_goalkeepers_per_event")
+      .eq("id", event.account_id)
+      .single();
+
+    throwIfError(accountError);
+
+    const maxGoalkeepers = (accountRow as { max_goalkeepers_per_event: number | null }).max_goalkeepers_per_event;
+
+    if (maxGoalkeepers !== null && maxGoalkeepers !== undefined) {
+      const { data: activeRows, error: activeError } = await supabase
+        .from("event_participants")
+        .select("account_player_id")
+        .eq("event_id", input.eventId)
+        .eq("selection_status", "active");
+
+      throwIfError(activeError);
+
+      const goalkeepersInList = ((activeRows ?? []) as { account_player_id: string | null }[]).filter(
+        (row) => row.account_player_id && goalkeeperIds.has(row.account_player_id),
+      ).length;
+
+      if (goalkeepersInList >= maxGoalkeepers) {
+        throw new Error(
+          `Esta chamada ja tem ${goalkeepersInList} goleiro${goalkeepersInList === 1 ? "" : "s"} (maximo ${maxGoalkeepers}).`,
+        );
+      }
+    }
+  }
+
+  if (!isGoalkeeper && playerGroup?.max_players && existingParticipant?.selection_status !== "active") {
     const { count, error: countError } = await supabase
       .from("event_participants")
       .select("id", { count: "exact", head: true })
@@ -2646,8 +2751,8 @@ export async function addPlayerToWeeklyEvent(input: {
       account_player_id: input.playerId,
       priority_group_id: player.priority_group_id,
       priority_rank_snapshot: priorityRankSnapshot,
-      is_paid: playerGroup?.paid_by_default ?? false,
-      paid_at: playerGroup?.paid_by_default ? new Date().toISOString() : null,
+      is_paid: !isGoalkeeper && (playerGroup?.paid_by_default ?? false),
+      paid_at: !isGoalkeeper && playerGroup?.paid_by_default ? new Date().toISOString() : null,
       roster_order: 999,
       response_status: "pending",
       selection_status: "active",
