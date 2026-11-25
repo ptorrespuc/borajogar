@@ -1400,7 +1400,7 @@ export async function listAccountPlayers(
   }));
 }
 
-async function listActiveMembershipsForAccount(accountId: string) {
+export async function listActiveMembershipsForAccount(accountId: string) {
   const { data, error } = await supabase
     .from("account_memberships")
     .select(

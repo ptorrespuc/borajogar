@@ -19,15 +19,18 @@ import Colors from "@/constants/Colors";
 import { PlayerPhotoField } from "@/src/components/player-photo-field";
 import {
   createAccountPlayer,
+  deactivateAccountMembership,
   deactivateAccountPlayer,
   ensurePlayerLoginAccess,
   findProfileByEmail,
   getAccountOverview,
   listAccountPlayers,
+  listActiveMembershipsForAccount,
   listAllSportsAccounts,
   listModalityPositions,
   updateAccountPlayer,
   updateProfileBasics,
+  upsertAccountMembership,
   type AccountOverview,
   type AccountPlayerAdminItem,
   type PlayerPositionInput,
@@ -42,7 +45,7 @@ import {
   type PreparedPlayerPhoto,
 } from "@/src/lib/player-photos";
 import { useAuth } from "@/src/providers/auth-provider";
-import type { AccountRole, DominantSide, ModalityPosition, PositionClassification, SportsAccount } from "@/src/types/domain";
+import type { AccountMembership, AccountRole, DominantSide, ModalityPosition, PositionClassification, SportsAccount } from "@/src/types/domain";
 
 const roleLabels: Record<AccountRole, string> = {
   group_admin: "Admin do grupo",
@@ -284,6 +287,9 @@ export default function RosterScreen() {
 
   const [playerNameDraft, setPlayerNameDraft] = useState("");
   const [playerEmailDraft, setPlayerEmailDraft] = useState("");
+  // Perfil de acesso do login do jogador nesta conta ("none" = sem acesso).
+  const [playerAccessRoleDraft, setPlayerAccessRoleDraft] = useState<AccountRole | "none">("none");
+  const [accountMemberships, setAccountMemberships] = useState<AccountMembership[]>([]);
   const [playerPhotoUrlDraft, setPlayerPhotoUrlDraft] = useState("");
   const [playerExistingPhotoUrl, setPlayerExistingPhotoUrl] = useState<string | null>(null);
   const [playerPreparedPhoto, setPlayerPreparedPhoto] = useState<PreparedPlayerPhoto | null>(null);
@@ -390,10 +396,11 @@ export default function RosterScreen() {
       setIsLoading(true);
 
       try {
-        const [nextOverview, nextPlayers, nextPositions] = await Promise.all([
+        const [nextOverview, nextPlayers, nextPositions, nextMemberships] = await Promise.all([
           getAccountOverview(selectedAccess.account.id),
           listAccountPlayers(selectedAccess.account.id, selectedAccess.account.modality_id),
           listModalityPositions(selectedAccess.account.modality_id),
+          listActiveMembershipsForAccount(selectedAccess.account.id),
         ]);
 
         if (!isActive) {
@@ -402,6 +409,7 @@ export default function RosterScreen() {
 
         setOverview(nextOverview);
         setAccountPlayers(nextPlayers);
+        setAccountMemberships(nextMemberships);
         setModalityPositions(nextPositions);
       } catch (loadError) {
         if (!isActive) {
@@ -453,6 +461,15 @@ export default function RosterScreen() {
     setPlayerDominantSideDraft(null);
     setPlayerNotesDraft("");
     setPlayerWeeklyDefaultDraft(true);
+    setPlayerAccessRoleDraft("none");
+  }
+
+  function findPlayerMembership(playerId: string, linkedProfileId: string | null) {
+    return (
+      accountMemberships.find((item) => item.account_player_id === playerId) ??
+      (linkedProfileId ? accountMemberships.find((item) => item.profile_id === linkedProfileId) : undefined) ??
+      null
+    );
   }
 
   function closePlayerModal() {
@@ -485,6 +502,7 @@ export default function RosterScreen() {
     setPlayerDominantSideDraft(item.player.dominant_side);
     setPlayerNotesDraft(item.player.notes ?? "");
     setPlayerWeeklyDefaultDraft(item.player.is_default_for_weekly_list);
+    setPlayerAccessRoleDraft(findPlayerMembership(item.player.id, item.linkedProfile?.id ?? null)?.role ?? "none");
   }
 
   function openCreatePlayerModal() {
@@ -609,14 +627,16 @@ export default function RosterScreen() {
       return;
     }
 
-    const [nextOverview, nextPlayers, nextPositions] = await Promise.all([
+    const [nextOverview, nextPlayers, nextPositions, nextMemberships] = await Promise.all([
       getAccountOverview(selectedAccess.account.id),
       listAccountPlayers(selectedAccess.account.id, selectedAccess.account.modality_id),
       listModalityPositions(selectedAccess.account.modality_id),
+      listActiveMembershipsForAccount(selectedAccess.account.id),
     ]);
 
     setOverview(nextOverview);
     setAccountPlayers(nextPlayers);
+    setAccountMemberships(nextMemberships);
     setModalityPositions(nextPositions);
   }
 
@@ -810,6 +830,11 @@ export default function RosterScreen() {
       }
 
       const normalizedPlayerEmail = playerEmailDraft.trim().toLowerCase() || null;
+
+      if (playerAccessRoleDraft !== "none" && !normalizedPlayerEmail) {
+        setMessage({ tone: "error", text: "Para dar um perfil de acesso, informe o email do jogador." });
+        return;
+      }
       const playerRating = parseOptionalPlayerRating(playerRatingDraft);
       const playerDominantSide = playerDominantSideDraft;
       const editingPlayer =
@@ -892,6 +917,25 @@ export default function RosterScreen() {
         });
       }
 
+      // Perfil de acesso (nao mexe no proprio acesso de quem esta editando).
+      let accessRoleSaved: AccountRole | null = null;
+      if (savedPlayerId && linkedProfileId !== profile.id) {
+        const currentAccess = findPlayerMembership(savedPlayerId, linkedProfileId);
+
+        if (playerAccessRoleDraft !== "none" && linkedProfileId) {
+          await upsertAccountMembership({
+            accountId: selectedAccess.account.id,
+            profileId: linkedProfileId,
+            accountPlayerId: savedPlayerId,
+            role: playerAccessRoleDraft,
+            priorityGroupId: playerPriorityGroupDraftId,
+          });
+          accessRoleSaved = playerAccessRoleDraft;
+        } else if (playerAccessRoleDraft === "none" && currentAccess) {
+          await deactivateAccountMembership(currentAccess.id);
+        }
+      }
+
       await reloadSelectedAccountData();
       closePlayerModal();
 
@@ -904,15 +948,16 @@ export default function RosterScreen() {
             })
           : false;
 
+      const accessSuffix = accessRoleSaved ? ` Perfil de acesso: ${roleLabels[accessRoleSaved]}.` : "";
       setMessage({
         tone: "success",
-        text: linkedProfileId && normalizedPlayerEmail
+        text: (linkedProfileId && normalizedPlayerEmail
           ? invitedAccess
             ? sharedManualLink
               ? "Jogador salvo. O limite de email do Supabase foi atingido e o link de primeiro acesso foi aberto para compartilhamento."
               : "Jogador salvo e o convite para definir a senha foi enviado por email."
             : "Jogador salvo e associado ao login existente."
-          : "Jogador salvo na conta esportiva.",
+          : "Jogador salvo na conta esportiva.") + accessSuffix,
       });
     } catch (saveError) {
       setMessage({ tone: "error", text: getReadableError(saveError) });
@@ -1032,6 +1077,36 @@ export default function RosterScreen() {
                         keyboardType="email-address"
                         style={styles.input}
                       />
+                    </View>
+                  ) : null}
+
+                  {showManagerFields ? (
+                    <View style={styles.fieldBlock}>
+                      <Text style={styles.label}>Perfil de acesso</Text>
+                      <Text style={styles.fieldHint}>
+                        O que o login deste jogador pode fazer nesta conta. Precisa do email acima.
+                      </Text>
+                      <View style={styles.chips}>
+                        {(["none", "player", "group_moderator", "group_admin"] as const).map((role) => (
+                          <Pressable
+                            key={role}
+                            onPress={() => setPlayerAccessRoleDraft(role)}
+                            style={[styles.chip, playerAccessRoleDraft === role && styles.chipSelected]}>
+                            <Text style={[styles.chipText, playerAccessRoleDraft === role && styles.chipTextSelected]}>
+                              {role === "none" ? "Sem acesso" : roleLabels[role]}
+                            </Text>
+                          </Pressable>
+                        ))}
+                      </View>
+                      <Text style={styles.fieldHint}>
+                        {playerAccessRoleDraft === "group_admin"
+                          ? "Administra elenco, chamadas e configuracoes da conta."
+                          : playerAccessRoleDraft === "group_moderator"
+                            ? "Cria e gerencia enquetes das chamadas."
+                            : playerAccessRoleDraft === "player"
+                              ? "Entra no app, ve a chamada e vota nas enquetes."
+                              : "O jogador fica so no elenco, sem entrar no app."}
+                      </Text>
                     </View>
                   ) : (
                     <View style={styles.readOnlyCard}>
@@ -1493,7 +1568,12 @@ export default function RosterScreen() {
                           <Text style={styles.playerName}>{item.player.full_name}</Text>
                           <Text style={styles.playerMeta}>
                             {item.player.email ?? "Sem email"} |{" "}
-                            {item.linkedProfile ? "Login vinculado" : "Sem login vinculado"}
+                            {item.linkedProfile
+                              ? (() => {
+                                  const access = findPlayerMembership(item.player.id, item.linkedProfile?.id ?? null);
+                                  return access ? `Acesso: ${roleLabels[access.role]}` : "Login vinculado, sem acesso";
+                                })()
+                              : "Sem login vinculado"}
                           </Text>
                           <Text style={styles.playerMeta}>
                             Prioridade: {item.priorityGroup?.name ?? "Nao definida"}
