@@ -1308,7 +1308,25 @@ export default function EventsScreen() {
   );
   // Goleiros (1a posicao "goleiro") ficam numa secao propria: nao contam no minimo e nao pagam.
   const viewedGoalkeepers = viewedRoster.filter((p) => isGoalkeeperPositions(p.preferredPositions));
-  const viewedFieldRoster = viewedRoster.filter((p) => !isGoalkeeperPositions(p.preferredPositions));
+  const viewedFieldRoster = viewedRoster
+    .filter((p) => !isGoalkeeperPositions(p.preferredPositions))
+    .sort((first, second) => {
+      if (first.participant.priority_rank_snapshot !== second.participant.priority_rank_snapshot) {
+        return first.participant.priority_rank_snapshot - second.participant.priority_rank_snapshot;
+      }
+
+      const firstEntry = first.participant.selection_changed_at ?? first.participant.created_at;
+      const secondEntry = second.participant.selection_changed_at ?? second.participant.created_at;
+
+      if (firstEntry !== secondEntry) {
+        return firstEntry.localeCompare(secondEntry);
+      }
+
+      return first.player.full_name.localeCompare(second.player.full_name);
+    });
+  // Quem passa do minimo da chamada fica como reserva (na ordem em que sobe).
+  const viewedStarters = viewedFieldRoster.slice(0, Math.max(0, viewedEventItem?.event.max_players ?? 0));
+  const viewedReserves = viewedFieldRoster.slice(viewedStarters.length);
   const maxGoalkeepers = overview?.account.max_goalkeepers_per_event ?? null;
   const activeParticipants = (activeEventItem?.participants ?? [])
     .filter((item) => item.participant.selection_status === "active")
@@ -2840,10 +2858,15 @@ export default function EventsScreen() {
             <View style={newStyles.quorumCardRow}>
               <View>
                 <Text style={newStyles.quorumCount}>
-                  {viewedFieldRoster.length}
+                  {viewedStarters.length}
                   <Text style={newStyles.quorumMax}>/{viewedEventItem.event.max_players}</Text>
                 </Text>
                 <Text style={newStyles.quorumLabel}>Jogadores de linha / mínimo</Text>
+                {viewedReserves.length > 0 ? (
+                  <Text style={newStyles.quorumLabel}>
+                    Reservas: {viewedReserves.length}
+                  </Text>
+                ) : null}
                 <Text style={newStyles.quorumLabel}>Goleiros: {goalkeeperCountText}</Text>
                 <Text style={newStyles.quorumLabel}>
                   Pagos: {viewedFieldRoster.filter((item) => item.participant.is_paid).length}/{viewedFieldRoster.length}
@@ -2883,11 +2906,18 @@ export default function EventsScreen() {
                       <Text style={newStyles.emptyText}>Nenhum goleiro na lista.</Text>
                     )}
                     <Text style={newStyles.sectionLabel}>
-                      Jogadores ({activeParticipants.filter((item) => !isGoalkeeperPositions(item.preferredPositions)).length})
+                      Jogadores ({viewedStarters.length}/{viewedEventItem.event.max_players})
                     </Text>
-                    {activeParticipants
-                      .filter((item) => !isGoalkeeperPositions(item.preferredPositions))
-                      .map(renderDraftRow)}
+                    {viewedStarters.map(renderDraftRow)}
+                    {viewedReserves.length > 0 ? (
+                      <>
+                        <Text style={newStyles.sectionLabel}>Reservas ({viewedReserves.length})</Text>
+                        <Text style={newStyles.playerMeta}>
+                          Passaram do mínimo. Entram na ordem abaixo se alguém sair.
+                        </Text>
+                        {viewedReserves.map(renderDraftRow)}
+                      </>
+                    ) : null}
                   </>
                 ) : (
                   <Text style={newStyles.emptyText}>Nenhum jogador ainda.</Text>
@@ -2979,12 +3009,18 @@ export default function EventsScreen() {
                   {viewedGoalkeepers.map(renderConfirmedCard)}
                 </>
               ) : null}
-              <Text style={newStyles.sectionLabel}>Confirmados ({viewedFieldRoster.length})</Text>
-              {viewedFieldRoster.length > 0 ? (
-                viewedFieldRoster.map(renderConfirmedCard)
+              <Text style={newStyles.sectionLabel}>Confirmados ({viewedStarters.length})</Text>
+              {viewedStarters.length > 0 ? (
+                viewedStarters.map(renderConfirmedCard)
               ) : (
                 <Text style={newStyles.emptyText}>Nenhum jogador registrado.</Text>
               )}
+              {viewedReserves.length > 0 ? (
+                <>
+                  <Text style={newStyles.sectionLabel}>Reservas ({viewedReserves.length})</Text>
+                  {viewedReserves.map(renderConfirmedCard)}
+                </>
+              ) : null}
             </View>
           )}
         </View>
